@@ -1,0 +1,2956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Optimus CertManager — POC</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1E1D1E; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+// ============================================================
+// POC NOTICE: This is a proof-of-concept build.
+// All API calls are mocked with simulated latency.
+// To promote to production:
+//   1. Replace every function marked "TODO (production)" with
+//      a real fetch() call to the documented endpoint.
+//   2. Remove Babel standalone and add a proper build step (Vite, etc.).
+//   3. Store secrets in environment variables or a secrets manager.
+//   4. Add proper error boundaries, retry logic, and auth flows.
+// ============================================================
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─────────────────────────────────────────────────────────────
+// STYLES
+// ─────────────────────────────────────────────────────────────
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
+
+:root {
+  --primary:        #1B39D8;
+  --secondary:      #7B35DD;
+  --tertiary:       #D030E2;
+  --black:          #1E1D1E;
+  --white:          #FFFFFF;
+  --gradient:       linear-gradient(135deg, #1B39D8 0%, #7B35DD 50%, #D030E2 100%);
+  --bg-surface:     #252428;
+  --bg-panel:       #2A2930;
+  --bg-input:       #1E1D22;
+  --border:         #3A383E;
+  --border-focus:   #7B35DD;
+  --text-primary:   #F2F1F4;
+  --text-muted:     #8A8892;
+  --text-dim:       #5C5A64;
+  --status-critical:#FF3B3B;
+  --status-warning: #F5A623;
+  --status-healthy: #2ECC71;
+  --status-expired: #CC3333;
+  --log-info:       #B0AEB6;
+  --log-success:    #2ECC71;
+  --log-warning:    #F5A623;
+  --log-error:      #FF3B3B;
+  --log-api:        #00D4FF;
+}
+
+/* ── Theme: Light Mode ───────────────────────────────── */
+:root[data-theme="light"] {
+  --bg-surface:     #F4F3F6;
+  --bg-panel:       #FFFFFF;
+  --bg-input:       #FFFFFF;
+  --border:         #C9C7CE;
+  --border-focus:   #7B35DD;
+  --text-primary:   #15141A;
+  --text-muted:     #3F3E45;
+  --text-dim:       #6B6970;
+  --log-info:       #3F3E45;
+  --log-api:        #1450C2;
+  --log-success:    #1F8A4A;
+  --log-warning:    #B07308;
+  --log-error:      #C7281D;
+  /* Status colors match dark/meg mode (vibrant). Visibility on white is
+     achieved via denser badge fills + stronger borders below, not by darkening. */
+}
+:root[data-theme="light"] .badge-critical {
+  background: rgba(255,59,59,0.22);
+  border-color: rgba(255,59,59,0.7);
+  font-weight: 700;
+}
+:root[data-theme="light"] .badge-warning {
+  background: rgba(245,166,35,0.28);
+  border-color: rgba(245,166,35,0.75);
+  font-weight: 700;
+}
+:root[data-theme="light"] .badge-healthy {
+  background: rgba(46,204,113,0.22);
+  border-color: rgba(46,204,113,0.7);
+  font-weight: 700;
+}
+:root[data-theme="light"] .badge-expired {
+  background: rgba(204,51,51,0.28);
+  border-color: rgba(204,51,51,0.75);
+  font-weight: 700;
+}
+:root[data-theme="light"] body { background: #ECEAEF; color: var(--text-primary); }
+
+/* Light mode — squircle mark keeps the brand gradient; wordmark flips
+   from its default white fill to black so it stays readable on the light bg. */
+:root[data-theme="light"] .app-logo path[fill="white"] { fill: #000 !important; }
+
+/* Tag pills — darker, higher-contrast in light mode */
+:root[data-theme="light"] .sans-tag {
+  background: rgba(123, 53, 221, 0.14);
+  border-color: rgba(123, 53, 221, 0.4);
+  color: #4A1B8C;
+  font-weight: 600;
+  box-shadow: inset 1px 0 0 rgba(123,53,221,0.45);
+}
+
+/* ── Theme: Meg Mode (pink-tinted dark) ──────────────── */
+:root[data-theme="meg"] {
+  --primary:        #FF3DA5;
+  --secondary:      #FF6FB7;
+  --tertiary:       #FFA1CE;
+  --gradient:       linear-gradient(135deg, #FF3DA5 0%, #FF6FB7 50%, #FFA1CE 100%);
+  --bg-surface:     #2A1E26;
+  --bg-panel:       #33252E;
+  --bg-input:       #1F141A;
+  --border:         #4A2F40;
+  --border-focus:   #FF3DA5;
+  --text-primary:   #FFEAF3;
+  --text-muted:     #C49EB3;
+  --text-dim:       #8A6377;
+  --log-info:       #E0BCD0;
+  --log-api:        #FF6FB7;
+}
+:root[data-theme="meg"] body { background: #1F141A; color: var(--text-primary); }
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background: var(--black);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+  min-height: 100vh;
+  padding-bottom: 44px;
+}
+
+.main-content {
+  padding: 16px 20px;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+.header-left { display: flex; align-items: center; gap: 12px; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+
+.header-tagline {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  letter-spacing: 0.2px;
+  color: var(--text-primary);
+  padding-left: 14px;
+  border-left: 2px solid var(--secondary);
+}
+
+/* ── POC Banner ──────────────────────────────────────── */
+.poc-banner {
+  background: #2D2200;
+  border-bottom: 2px solid var(--status-warning);
+  padding: 6px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--status-warning);
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.poc-banner-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--status-warning);
+  flex-shrink: 0;
+  animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── Settings Drawer ─────────────────────────────────── */
+.settings-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
+  z-index: 700;
+  animation: fade-in 0.18s ease;
+}
+
+.settings-panel {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 400px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: -12px 0 48px rgba(0,0,0,0.5);
+}
+.settings-panel.open {
+  transform: translateX(0);
+}
+
+.settings-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.settings-drawer-title {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  color: var(--white);
+  letter-spacing: 0.2px;
+}
+.settings-drawer-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1;
+  transition: color 0.15s, border-color 0.15s;
+}
+.settings-drawer-close:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+.settings-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.settings-drawer-footer {
+  flex-shrink: 0;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-panel);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.settings-field { display: flex; flex-direction: column; gap: 4px; }
+
+.settings-field label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.settings-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.settings-input-wrap input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+  padding-right: 32px;
+}
+
+.settings-input-wrap input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(123,53,221,0.15);
+}
+
+.settings-input-wrap input::placeholder { color: var(--text-dim); font-size: 12px; }
+
+.settings-field-full { grid-column: 1 / -1; }
+
+.settings-textarea {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+  resize: vertical;
+  min-height: 90px;
+}
+.settings-textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(123,53,221,0.15);
+}
+.settings-textarea::placeholder { color: var(--text-dim); font-size: 12px; }
+
+.themed-select {
+  position: relative;
+  width: 100%;
+  font-family: 'DM Mono', monospace;
+}
+.themed-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: left;
+}
+.themed-select-trigger:hover { border-color: var(--text-muted); }
+.themed-select-trigger:focus,
+.themed-select.open .themed-select-trigger {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(123,53,221,0.15);
+}
+.themed-select-caret {
+  width: 10px; height: 10px; flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+.themed-select.open .themed-select-caret { transform: rotate(180deg); color: var(--text-primary); }
+
+.themed-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px;
+  z-index: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: themed-select-in 0.12s ease-out;
+}
+@keyframes themed-select-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.themed-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+  user-select: none;
+}
+.themed-select-option:hover { background: rgba(123,53,221,0.12); }
+:root[data-theme="meg"] .themed-select-option:hover { background: rgba(255,61,165,0.14); }
+:root[data-theme="light"] .themed-select-option:hover { background: rgba(123,53,221,0.10); }
+.themed-select-option.selected {
+  background: var(--gradient);
+  color: #fff;
+}
+.themed-select-option.selected:hover { background: var(--gradient); }
+.themed-select-check {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
+.settings-dirty-indicator {
+  margin-right: auto;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.settings-dirty-indicator.visible {
+  opacity: 1;
+  color: var(--log-warning);
+}
+
+.eye-btn {
+  position: absolute; right: 8px;
+  background: none; border: none;
+  cursor: pointer; color: var(--text-muted);
+  display: flex; align-items: center;
+  padding: 2px; transition: color 0.15s;
+}
+.eye-btn:hover { color: var(--text-primary); }
+
+/* ── Buttons ─────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: none; border-radius: 5px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; font-weight: 500;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; }
+
+.btn-primary { background: var(--gradient); color: #fff; padding: 7px 14px; font-size: 13px; }
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+
+.btn-secondary {
+  background: transparent; color: var(--text-primary);
+  border: 1px solid var(--border); padding: 7px 14px; font-size: 13px;
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--text-muted); background: rgba(255,255,255,0.04); }
+
+.btn-ghost {
+  background: transparent; color: var(--text-muted);
+  padding: 5px 10px; font-size: 12px; border: 1px solid transparent;
+}
+.btn-ghost:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border); }
+
+.btn-danger {
+  background: rgba(255,59,59,0.12); color: var(--status-critical);
+  border: 1px solid rgba(255,59,59,0.25); padding: 7px 14px; font-size: 13px;
+}
+.btn-danger:hover:not(:disabled) { background: rgba(255,59,59,0.2); }
+
+.btn-sm  { padding: 4px 10px; font-size: 12px; }
+.btn-xs  { padding: 3px 8px;  font-size: 11px; }
+
+.settings-toggle-btn {
+  background: transparent; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-muted); cursor: pointer; padding: 6px 12px;
+  font-size: 12px; font-family: 'DM Sans', sans-serif; font-weight: 500;
+  display: flex; align-items: center; gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.settings-toggle-btn:hover,
+.settings-toggle-btn.active { color: var(--text-primary); border-color: var(--text-muted); }
+
+/* ── Dashboard ───────────────────────────────────────── */
+.dashboard-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; gap: 12px;
+}
+.dashboard-title {
+  font-size: 16px; font-weight: 700; color: var(--text-primary);
+  display: flex; align-items: center; gap: 8px;
+}
+.dashboard-meta { font-size: 11px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+.dashboard-controls { display: flex; align-items: center; gap: 10px; }
+
+/* ── Dashboard secondary toolbar row ────────────────── */
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 10px;
+}
+.dashboard-toolbar-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.2px;
+}
+.dashboard-toolbar-controls { display: flex; align-items: center; gap: 8px; }
+
+/* ── Refresh interval toggle group ───────────────────── */
+.refresh-interval-group {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.refresh-interval-btn {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.refresh-interval-btn:last-child { border-right: none; }
+.refresh-interval-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.refresh-interval-btn.active {
+  background: var(--gradient);
+  color: #fff;
+}
+
+/* ── Cert Table ──────────────────────────────────────── */
+.table-wrap {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden;
+}
+.cert-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.cert-th {
+  background: var(--bg-panel); padding: 10px 12px; text-align: left;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-muted);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.cert-th.sortable { cursor: pointer; user-select: none; }
+.cert-th.sortable:hover { color: var(--text-primary); }
+.cert-th.sort-active { color: var(--text-primary); }
+.sort-indicator { display: inline-block; margin-left: 4px; font-size: 10px; opacity: 0.7; }
+
+.cert-td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  vertical-align: middle; color: var(--text-primary);
+}
+.cert-row:last-child .cert-td { border-bottom: none; }
+.cert-row:hover .cert-td { background: rgba(255,255,255,0.04) !important; }
+
+/* ── Status-driven row accents ───────────────────────── */
+.cert-row-critical > td:first-child { border-left: 3px solid var(--status-critical); padding-left: 9px; }
+.cert-row-warning  > td:first-child { border-left: 3px solid var(--status-warning);  padding-left: 9px; }
+.cert-row-expired  > td:first-child { border-left: 3px solid var(--status-expired);  padding-left: 9px; }
+.cert-row-healthy  > td:first-child { border-left: 3px solid transparent; padding-left: 9px; }
+.cert-row-critical .cert-td { background: rgba(255,59,59,0.018); }
+.cert-row-expired  .cert-td { background: rgba(204,51,51,0.022); }
+
+.cert-name { font-weight: 500; font-family: 'DM Mono', monospace; font-size: 12px; }
+.cert-subject {
+  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-muted);
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sans-list { display: flex; flex-wrap: wrap; gap: 3px; }
+.sans-tag {
+  background: rgba(123,53,221,0.2);
+  color: #B088EE;
+  border: 1px solid rgba(123,53,221,0.35);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  box-shadow: inset 1px 0 0 rgba(123,53,221,0.4);
+}
+.cert-issuer {
+  font-size: 11px; color: var(--text-muted);
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.expiry-date { font-family: 'DM Mono', monospace; font-size: 12px; white-space: nowrap; }
+.days-remaining { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 600; }
+.days-critical { color: var(--status-critical); }
+.days-warning  { color: var(--status-warning); }
+.days-healthy  { color: var(--status-healthy); }
+.days-expired  { color: var(--status-expired); }
+
+/* ── Status Badges ───────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 4px; font-size: 11px;
+  font-weight: 600; letter-spacing: 0.3px; white-space: nowrap;
+  font-family: 'DM Sans', sans-serif;
+}
+.badge-critical {
+  background: rgba(255,59,59,0.12); color: var(--status-critical);
+  border: 1px solid rgba(255,59,59,0.3);
+  animation: pulse-critical 1.5s ease-in-out infinite;
+}
+.badge-warning  { background: rgba(245,166,35,0.12); color: var(--status-warning);  border: 1px solid rgba(245,166,35,0.3); }
+.badge-healthy  { background: rgba(46,204,113,0.1);  color: var(--status-healthy);  border: 1px solid rgba(46,204,113,0.25); }
+.badge-expired  { background: rgba(139,0,0,0.2);     color: var(--status-expired);  border: 1px solid rgba(139,0,0,0.4); }
+.badge-filter   { cursor: pointer; transition: opacity 0.15s, box-shadow 0.15s; user-select: none; }
+.badge-filter:hover { opacity: 0.8; }
+.badge-filter.filter-active  { box-shadow: 0 0 0 2px currentColor; }
+.badge-filter.filter-inactive { opacity: 0.35; }
+
+@keyframes pulse-critical {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,59,0.4); }
+  50%       { box-shadow: 0 0 0 5px rgba(255,59,59,0); }
+}
+
+/* ── Action Buttons ──────────────────────────────────── */
+.action-cell { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+
+.tooltip-wrap { position: relative; display: inline-block; }
+.tooltip-wrap .tooltip-text {
+  visibility: hidden; opacity: 0;
+  position: absolute; bottom: 130%; left: 50%;
+  transform: translateX(-50%);
+  background: #1A1920; color: var(--text-muted);
+  padding: 5px 9px; border-radius: 5px; font-size: 11px;
+  white-space: nowrap; pointer-events: none;
+  transition: opacity 0.15s; z-index: 300;
+  border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
+
+/* ── Modals ──────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.78);
+  backdrop-filter: blur(5px);
+  z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; animation: fade-in 0.15s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-box {
+  background: var(--bg-panel);
+  border: 1px solid var(--secondary);
+  box-shadow: 0 0 40px rgba(123,53,221,0.25), 0 20px 60px rgba(0,0,0,0.6);
+  border-radius: 10px; padding: 28px;
+  max-width: 580px; width: 100%;
+  animation: modal-in 0.2s ease;
+  max-height: 90vh; overflow-y: auto;
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(-14px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-title {
+  font-size: 18px; font-weight: 700; margin-bottom: 20px;
+  color: #fff;
+}
+/* Light mode — flip to dark text so it's readable on white panels */
+:root[data-theme="light"] .modal-title { color: var(--text-primary); }
+.modal-section { margin-bottom: 18px; }
+.modal-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); font-weight: 600; margin-bottom: 4px;
+}
+.modal-value {
+  font-family: 'DM Mono', monospace; font-size: 13px; color: var(--text-primary);
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 5px; padding: 8px 12px; word-break: break-all;
+}
+.modal-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+.expiry-warning {
+  background: rgba(255,59,59,0.1); border: 1px solid rgba(255,59,59,0.3);
+  border-radius: 5px; padding: 10px 14px; color: var(--status-critical);
+  font-size: 13px; display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px;
+}
+
+/* ── Passphrase field ────────────────────────────────── */
+.passphrase-field {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 5px; padding: 8px 12px;
+}
+.passphrase-value {
+  font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500;
+  color: var(--text-primary); flex: 1; letter-spacing: 1px;
+}
+.passphrase-masked { letter-spacing: 3px; font-size: 16px; color: var(--text-muted); }
+.passphrase-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  padding: 0;
+}
+.passphrase-input::placeholder { color: var(--text-dim); }
+.passphrase-input:focus { outline: none; }
+.passphrase-field:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(123,53,221,0.15);
+}
+/* The .eye-btn class is shared with the Settings panel where it's
+   absolute-positioned inside .settings-input-wrap. Inside the passphrase
+   field we want it to flow normally between the input and the Copy button. */
+.passphrase-field .eye-btn { position: static; }
+
+.copy-btn {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-muted); cursor: pointer; padding: 3px 8px;
+  font-size: 11px; font-family: 'DM Sans', sans-serif;
+  transition: all 0.15s; white-space: nowrap;
+}
+.copy-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.copy-btn.copied { color: var(--status-healthy); border-color: var(--status-healthy); }
+
+.passphrase-warning {
+  background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.25);
+  border-radius: 5px; padding: 10px 14px; color: var(--status-warning);
+  font-size: 12px; margin-top: 10px; display: flex; align-items: flex-start; gap: 8px;
+}
+
+/* ── Deploy Modal ────────────────────────────────────── */
+.deploy-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.deploy-form-field { display: flex; flex-direction: column; gap: 4px; }
+.deploy-form-field.full-width { grid-column: 1 / -1; }
+
+.deploy-input {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 5px; padding: 7px 10px; color: var(--text-primary);
+  font-size: 13px; font-family: 'DM Mono', monospace;
+  outline: none; transition: border-color 0.15s; width: 100%;
+}
+.deploy-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(123,53,221,0.15); }
+.deploy-input::placeholder { color: var(--text-dim); }
+
+.checkbox-row { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.checkbox-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--secondary); cursor: pointer; }
+.checkbox-label { font-size: 13px; color: var(--text-primary); }
+
+.deploy-steps { display: flex; gap: 6px; margin-bottom: 16px; }
+.deploy-step { flex: 1; height: 4px; background: var(--border); border-radius: 2px; transition: background 0.3s; }
+.deploy-step.active { background: var(--gradient); }
+.deploy-step.done   { background: var(--status-healthy); }
+
+/* ── Manage modal ────────────────────────────────────── */
+.manage-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-family: 'DM Mono', monospace;
+}
+
+.manage-option-block {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.manage-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.manage-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.manage-step-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.manage-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.manage-step-msg {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  margin-top: 2px;
+}
+
+/* ── Row status chips ────────────────────────────────── */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.chip-renewed    { background: rgba(123,53,221,0.12); color: #B088EE; border: 1px solid rgba(123,53,221,0.3); }
+.chip-downloaded { background: rgba(0,212,255,0.1);   color: #00D4FF; border: 1px solid rgba(0,212,255,0.25); }
+.chip-deployed   { background: rgba(46,204,113,0.1);  color: var(--status-healthy); border: 1px solid rgba(46,204,113,0.25); }
+
+/* ── Spinner ─────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 13px; height: 13px;
+  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+  display: inline-block; flex-shrink: 0;
+}
+
+/* ── Activity Log ────────────────────────────────────── */
+.log-panel {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  height: 33vh; background: var(--bg-panel);
+  border-top: 2px solid var(--border); z-index: 500;
+  display: flex; flex-direction: column;
+  transition: height 0.25s ease; overflow: hidden;
+}
+.log-panel.expanded { height: 100vh; }
+.log-panel.collapsed { height: 36px; }
+.log-panel.collapsed::before { display: none; }
+
+/* ── Collapsed status bar ────────────────────────────── */
+.log-status-bar {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'DM Mono', monospace;
+}
+.log-status-bar:hover { background: rgba(255,255,255,0.025); }
+.log-status-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.log-status-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.log-status-dot.dot-SUCCESS { background: var(--log-success); }
+.log-status-dot.dot-ERROR   { background: var(--log-error); }
+.log-status-dot.dot-WARNING { background: var(--log-warning); }
+.log-status-dot.dot-API     { background: var(--log-api); }
+.log-status-dot.dot-INFO    { background: var(--text-dim); }
+.log-status-msg {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.log-status-msg.msg-SUCCESS { color: var(--log-success); }
+.log-status-msg.msg-ERROR   { color: var(--log-error); }
+.log-status-msg.msg-WARNING { color: var(--log-warning); }
+.log-status-msg.msg-API     { color: var(--log-api); }
+.log-status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.log-count-pill {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  color: var(--text-muted);
+}
+.log-expand-chevron {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); padding: 2px 4px;
+  font-size: 11px; line-height: 1;
+  transition: color 0.15s;
+}
+.log-expand-chevron:hover { color: var(--text-primary); }
+
+.log-collapsed-hint {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 4px;
+  letter-spacing: 0.4px;
+}
+
+/* ── Skeleton / shimmer loading ──────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+.skeleton {
+  border-radius: 4px;
+  height: 11px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface) 25%,
+    rgba(255,255,255,0.05) 50%,
+    var(--bg-surface) 75%
+  );
+  background-size: 1200px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+.skeleton-sm  { height: 9px; }
+.skeleton-tag { height: 18px; border-radius: 4px; }
+.skeleton-row td { padding: 13px 12px; border-bottom: 1px solid var(--border); }
+
+/* ── Empty state ─────────────────────────────────────── */
+.empty-state-cell {
+  text-align: center;
+  padding: 52px 20px !important;
+  border-bottom: none !important;
+}
+.empty-state-icon {
+  margin: 0 auto 12px;
+  opacity: 0.35;
+  display: block;
+}
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-family: 'DM Sans', sans-serif;
+}
+.empty-state-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.2px;
+}
+
+.log-panel::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px
+  );
+  z-index: 1;
+}
+
+.log-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 14px; background: var(--bg-panel);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  position: relative; z-index: 2;
+}
+.log-header-left  { display: flex; align-items: center; gap: 8px; }
+.log-header-right { display: flex; align-items: center; gap: 6px; }
+
+.log-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--text-muted); font-family: 'DM Mono', monospace;
+}
+.log-badge {
+  background: var(--gradient); color: #fff; border-radius: 10px;
+  padding: 1px 8px; font-size: 11px; font-weight: 600; font-family: 'DM Mono', monospace;
+}
+
+.log-entries {
+  font-family: 'DM Mono', monospace; font-size: 12px;
+  overflow-y: auto; flex: 1; padding: 8px 14px;
+  position: relative; z-index: 2;
+}
+.log-entry {
+  display: flex; gap: 10px; padding: 2px 0;
+  animation: slide-in 0.22s ease forwards; line-height: 1.6;
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.log-ts    { color: var(--text-dim); flex-shrink: 0; font-size: 11px; }
+.log-level { flex-shrink: 0; font-weight: 500; min-width: 52px; font-size: 11px; }
+.log-msg   { word-break: break-word; }
+
+.level-INFO    { color: var(--log-info); }
+.level-SUCCESS { color: var(--log-success); }
+.level-WARNING { color: var(--log-warning); }
+.level-ERROR   { color: var(--log-error); }
+.level-API     { color: var(--log-api); }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── New Certificate Request Modal ── */
+.ncr-template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.ncr-template-card {
+  padding: 10px 12px; border-radius: 6px; cursor: pointer;
+  background: var(--bg-input); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.ncr-template-card:hover { border-color: var(--secondary); }
+.ncr-template-card.selected { background: rgba(123,53,221,0.1); border-color: var(--secondary); }
+.ncr-template-name { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 3px; }
+.ncr-template-desc { font-size: 10px; color: var(--text-dim); font-family: 'DM Mono', monospace; line-height: 1.4; }
+.ncr-defaults {
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px;
+}
+.ncr-default-row { display: flex; flex-direction: column; gap: 1px; }
+.ncr-default-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+.ncr-default-value { font-size: 11px; color: var(--text-muted); font-family: 'DM Mono', monospace; }
+.ncr-algo-grid {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+/* Equal-width children — fill the row with no edge whitespace. */
+.ncr-algo-grid > * { flex: 1 1 0; min-width: 0; }
+.ncr-algo-btn {
+  padding: 7px 6px; border-radius: 5px; cursor: pointer; text-align: center;
+  background: var(--bg-input); border: 1px solid var(--border);
+  font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ncr-algo-btn:hover  { border-color: var(--secondary); color: var(--text-primary); }
+.ncr-algo-btn.selected { background: rgba(123,53,221,0.12); border-color: var(--secondary); color: var(--text-primary); font-weight: 700; }
+.ncr-tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.ncr-tag {
+  padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  font-size: 11px; font-family: 'DM Mono', monospace; font-weight: 600;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
+  transition: all 0.15s; user-select: none;
+}
+.ncr-tag:hover   { border-color: var(--secondary); color: var(--text-primary); }
+.ncr-tag.selected { background: rgba(123,53,221,0.12); border-color: var(--secondary); color: #B088EE; }
+.ncr-success {
+  background: rgba(46,204,113,0.08); border: 1px solid rgba(46,204,113,0.3);
+  border-radius: 8px; padding: 20px; text-align: center;
+}
+.ncr-success-icon { font-size: 32px; margin-bottom: 8px; }
+.ncr-success-title { font-size: 15px; font-weight: 700; color: var(--status-healthy); margin-bottom: 6px; }
+.ncr-success-id { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text-dim); }
+
+.loading-row td {
+  text-align: center; padding: 40px;
+  color: var(--text-muted); font-family: 'DM Mono', monospace; font-size: 12px;
+}
+`;
+
+function StyleInjector() {
+  useEffect(() => {
+    const el = document.createElement('style');
+    el.id = 'certmanager-styles';
+    el.textContent = STYLES;
+    document.head.appendChild(el);
+    return () => el.remove();
+  }, []);
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────────────────────
+function uuid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function generatePassphrase() {
+  const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes).map(b => CHARS[b % CHARS.length]).join('');
+}
+
+// Display format for expiration dates. Storage stays ISO (YYYY-MM-DD) because
+// it's used for new Date() comparisons in dedupe / sort logic; only the
+// rendered string changes.
+function formatExpirationDate(iso) {
+  if (!iso) return '—';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const [, y, mo, d] = m;
+  return `${mo}-${d}-${y}`;
+}
+
+function formatRelativeTime(date) {
+  if (!date) return '—';
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 10)   return 'just now';
+  if (diff < 60)   return `${diff}s ago`;
+  if (diff < 120)  return '1 min ago';
+  if (diff < 3600) return `${Math.floor(diff / 60)} mins ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      return true;
+    } catch { return false; }
+  }
+}
+
+function downloadTextFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOCK CERTIFICATE DATA
+// ─────────────────────────────────────────────────────────────
+const MOCK_CERTS_BASE = [
+  {
+    id: 'cert-001', name: 'api.optimus.internal',
+    subject: 'CN=api.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Synapsys', 'PowerFrame'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-04-29',
+    daysRemaining: 2, status: 'Critical',
+    thumbprint: 'A3:F2:91:BC:44:D1:7E:09:55:AA:31:CF:88:1B:20:4D',
+  },
+  {
+    id: 'cert-002', name: 'auth.optimus.internal',
+    subject: 'CN=auth.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Synapsys', 'Synergy', 'SymApp', 'Finboa'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-05-03',
+    daysRemaining: 6, status: 'Critical',
+    thumbprint: 'B1:CC:04:2A:88:F3:90:D2:11:7B:55:E4:09:AB:C2:3F',
+  },
+  {
+    id: 'cert-003', name: 'dashboard.optimus.com',
+    subject: 'CN=dashboard.optimus.com, O=Optimus Corp, C=US',
+    tags: ['Synergy'],
+    issuer: 'DigiCert TLS RSA SHA256 2020 CA1', expirationDate: '2026-05-17',
+    daysRemaining: 20, status: 'Warning',
+    thumbprint: '5D:11:F7:BC:33:04:CC:9A:22:1E:88:40:D3:BB:09:7F',
+  },
+  {
+    id: 'cert-004', name: 'reporting.optimus.internal',
+    subject: 'CN=reporting.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Finboa', 'PowerFrame'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-05-22',
+    daysRemaining: 25, status: 'Warning',
+    thumbprint: 'C9:44:2E:FF:71:B0:55:D3:80:12:AC:77:31:6F:DD:81',
+  },
+  {
+    id: 'cert-005', name: 'vpn.optimus.internal',
+    subject: 'CN=vpn.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Synapsys', 'Synergy'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-07-15',
+    daysRemaining: 79, status: 'Healthy',
+    thumbprint: '7A:8B:C5:D6:E7:F8:09:1A:2B:3C:4D:5E:6F:70:81:92',
+  },
+  {
+    id: 'cert-006', name: 'storage.optimus.internal',
+    subject: 'CN=storage.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['PowerFrame', 'SymApp'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-09-03',
+    daysRemaining: 129, status: 'Healthy',
+    thumbprint: 'D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3',
+  },
+  {
+    id: 'cert-007', name: 'mail.optimus.com',
+    subject: 'CN=mail.optimus.com, O=Optimus Corp, C=US',
+    tags: ['Synergy'],
+    issuer: 'Sectigo RSA Domain Validation CA', expirationDate: '2027-01-11',
+    daysRemaining: 259, status: 'Healthy',
+    thumbprint: 'E3:F4:05:16:27:38:49:5A:6B:7C:8D:9E:AF:B0:C1:D2',
+  },
+  {
+    id: 'cert-008', name: 'legacy-portal.optimus.com',
+    subject: 'CN=legacy-portal.optimus.com, O=Optimus Corp, C=US',
+    tags: ['SymApp'],
+    issuer: 'DigiCert SHA2 Secure Server CA', expirationDate: '2026-02-01',
+    daysRemaining: -85, status: 'Expired',
+    thumbprint: '22:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67',
+  },
+  {
+    id: 'cert-009', name: 'ci.optimus.internal',
+    subject: 'CN=ci.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Synapsys'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-06-10',
+    daysRemaining: 44, status: 'Healthy',
+    thumbprint: 'F1:02:13:24:35:46:57:68:79:8A:9B:AC:BD:CE:DF:E0',
+  },
+  {
+    id: 'cert-010', name: 'metrics.optimus.internal',
+    subject: 'CN=metrics.optimus.internal, O=Optimus Corp, C=US',
+    tags: ['Finboa', 'PowerFrame'],
+    issuer: 'Optimus Internal CA G2', expirationDate: '2026-05-12',
+    daysRemaining: 15, status: 'Warning',
+    thumbprint: '33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22',
+  },
+];
+
+// ─────────────────────────────────────────────────────────────
+// MOCK API LAYER
+// ─────────────────────────────────────────────────────────────
+
+// Fetches certificates — uses Venafi live API when Settings are populated,
+// falls back to mock data otherwise (POC mode).
+async function mockFetchCerts(settings = {}) {
+  if (settings.vaultUrl && settings.vaultToken) {
+    return realFetchCerts(settings); // live path — see realFetchCerts above
+  }
+  // ── mock fallback (POC mode) ──────────────────────────────
+  await delay(700 + Math.random() * 400);
+  return MOCK_CERTS_BASE.map(c => ({ ...c, renewedAt: null, downloadedAt: null, deployedAt: null }));
+}
+
+// TODO (production): replace mock with real fetch call
+// POST /api/v1/certificates/{id}/renew  body: { passphrase }
+async function mockRenewCert(certId, _passphrase) {
+  await delay(800 + Math.random() * 400);
+  if (Math.random() < 0.05) throw new Error('Certificate renewal failed: CA unreachable (mock)');
+  return { success: true, certId, renewedAt: new Date().toISOString() };
+}
+
+// TODO (production): replace mock with real fetch call
+// GET /api/v1/certificates/{id}/export?format=PFX|PEM
+async function mockExportCert(certId, format = 'PFX') {
+  await delay(600 + Math.random() * 400);
+  if (format === 'PEM') {
+    const pemData = `-----BEGIN CERTIFICATE-----\nMOCK_PEM_CERT_DATA_FOR_${certId}_${Date.now()}\n-----END CERTIFICATE-----\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nMOCK_PEM_KEY_DATA\n-----END ENCRYPTED PRIVATE KEY-----`;
+    return new Blob([pemData], { type: 'application/x-pem-file' });
+  }
+  return new Blob([`MOCK_PFX_BINARY_DATA_FOR_${certId}_${Date.now()}`], { type: 'application/x-pkcs12' });
+}
+
+// TODO (production): replace mock with real fetch calls
+// POST /api/tokens  →  POST /api/scheduleActions  →  GET /api/dailyJobs (poll)
+// Deploy flow disabled — see ./deploy_future/ for the parked PowerShell script,
+// cert_service endpoint, and modal UI snippet to re-enable it later.
+
+// TODO (production): replace mock with real fetch call
+// POST /api/v1/certificates/request
+async function mockCreateCert(payload) {
+  await delay(1000 + Math.random() * 600);
+  const id = 'cert-' + Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2,'0')).join('');
+  return { success: true, certificateId: id };
+}
+
+// ─────────────────────────────────────────────────────────────
+// VENAFI CLOUD — LIVE API INTEGRATION
+// NOTE: api.venafi.cloud must allow CORS from your host.
+// When opening via file://, a local proxy or http:// server is required.
+// ─────────────────────────────────────────────────────────────
+
+// Maps one Venafi certificate search result → portal cert shape.
+// Field names reflect Venafi TLS Protect Cloud v1 response schema.
+// Verify against a real API response and adjust if needed.
+function mapVenafiCert(raw) {
+  const expirationDate = raw.validityEnd?.slice(0, 10) ?? '';
+  const daysRemaining  = Math.floor((new Date(raw.validityEnd) - Date.now()) / 86_400_000);
+  const status = daysRemaining < 0   ? 'Expired'
+               : daysRemaining <= 7  ? 'Critical'
+               : daysRemaining <= 30 ? 'Warning'
+               : 'Healthy';
+  return {
+    id:            raw.id ?? raw.managedCertificateId ?? raw.fingerprint,
+    name:          raw.subjectCN?.[0] ?? raw.subjectDN ?? '',
+    subject:       raw.subjectDN ?? '',
+    tags:          Array.isArray(raw.tags) ? raw.tags : [],
+    issuer:        raw.issuerCN?.[0] ?? raw.issuerDN ?? '',
+    expirationDate,
+    daysRemaining,
+    status,
+    thumbprint:    raw.fingerprintSha256 ?? raw.fingerprint ?? '',
+    // Subject components — used to seed the CSR when re-issuing this cert
+    // so the new CSR matches whatever the Venafi CIT policy requires.
+    subjectO:      raw.subjectO ?? '',
+    subjectOU:     Array.isArray(raw.subjectOU) ? raw.subjectOU : [],
+    subjectL:      raw.subjectL ?? '',
+    subjectST:     raw.subjectST ?? '',
+    subjectC:      raw.subjectC ?? '',
+    sanDnsNames:   Array.isArray(raw.subjectAlternativeNameDns) ? raw.subjectAlternativeNameDns : [],
+    renewedAt:     null,
+    downloadedAt:  null,
+    deployedAt:    null,
+  };
+}
+
+// Venafi can return multiple ACTIVE certs for the same hostname (different issuers,
+// different tags, overlapping validity windows). The dashboard collapses duplicates
+// only when hostname + issuer + tag-set all match — different issuer or different
+// tag means the cert serves a different purpose and gets its own row. Within a
+// matching group, the cert with the latest expiry wins.
+function dedupeByHostname(certs) {
+  const byKey = new Map();
+  for (const c of certs) {
+    const host    = (c.name   || '').toLowerCase();
+    if (!host) continue;
+    const issuer  = (c.issuer || '').toLowerCase();
+    const tagsKey = (Array.isArray(c.tags) ? c.tags : [])
+      .map(t => String(t).toLowerCase())
+      .sort()
+      .join('|');
+    const key = `${host}::${issuer}::${tagsKey}`;
+    const prev = byKey.get(key);
+    if (!prev || new Date(c.expirationDate) > new Date(prev.expirationDate)) {
+      byKey.set(key, c);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+// Active when vaultUrl + vaultToken are set in Settings.
+// POST /outagedetection/v1/certificatesearch
+async function realFetchCerts(settings) {
+  const hostnames = (settings.dnsHostnames || '')
+    .split('\n').map(s => s.trim()).filter(Boolean);
+
+  const innerOperands = [
+    { field: 'certificateStatus', operator: 'MATCH', value: 'ACTIVE' },
+  ];
+  if (hostnames.length) {
+    innerOperands.push({ field: 'dNSName', operator: 'MATCH', values: hostnames });
+  }
+
+  const res = await fetch(`${settings.vaultUrl}/outagedetection/v1/certificatesearch`, {
+    method: 'POST',
+    headers: {
+      'accept':       'application/json',
+      'content-type': 'application/json',
+      'tppl-api-key': settings.vaultToken,
+    },
+    body: JSON.stringify({
+      expression: { operands: [{ operands: innerOperands, operator: 'AND' }] },
+    }),
+  });
+  if (!res.ok) throw new Error(`Venafi API ${res.status} ${res.statusText}`);
+  const json = await res.json();
+  return dedupeByHostname((json.certificates ?? []).map(mapVenafiCert));
+}
+
+// Local Python bridge that wraps CertDownload.py's keystore flow. Run with
+//   python cert_service.py
+// from the repo root. The portal POSTs to it whenever live credentials are set.
+const CERT_SERVICE_URL = 'http://127.0.0.1:8765';
+
+// Real keystore download — POSTs to cert_service which calls
+// CertDownload.download_existing(cert_id, ...) and streams back a ZIP blob.
+async function realExportCert(cert, exportFormat, settings, passphrase) {
+  return certServiceFetch('/api/download/existing', {
+    certificateId: cert.id,
+    passphrase,
+    exportFormat,
+    apiKey:   settings.vaultToken || undefined,
+    vaultUrl: settings.vaultUrl   || undefined,
+  });
+}
+
+// Real mint + download — POSTs to cert_service which calls
+// CertDownload.mint_and_download(cert_type, cn, ...) and streams back the
+// freshly-issued cert's keystore as a ZIP blob.
+async function realMintAndDownload(cert, exportFormat, settings, passphrase) {
+  // Build CSR attrs from the existing cert so the new CSR satisfies the
+  // CIT's distinguished-name policy (Venafi rejects mismatched O/L/ST/C).
+  const csrAttrs = {
+    commonName:   cert.name,
+    organization: cert.subjectO  || undefined,
+    organizationalUnits: (cert.subjectOU && cert.subjectOU.length) ? cert.subjectOU : undefined,
+    locality:     cert.subjectL  || undefined,
+    state:        cert.subjectST || undefined,
+    country:      cert.subjectC  || undefined,
+    subjectAlternativeNamesByType: {
+      dnsNames: (cert.sanDnsNames && cert.sanDnsNames.length) ? cert.sanDnsNames : [cert.name],
+    },
+  };
+  return certServiceFetch('/api/download/mint', {
+    certType:    inferCertType(cert),
+    commonName:  cert.name,
+    csrAttrs,
+    passphrase,
+    exportFormat,
+    // Carry the source cert's tags onto the renewed cert so the Venafi UI
+    // shows the same product grouping.
+    tags:        Array.isArray(cert.tags) && cert.tags.length ? cert.tags : undefined,
+    apiKey:   settings.vaultToken || undefined,
+    vaultUrl: settings.vaultUrl   || undefined,
+  });
+}
+
+// Issue a brand-new cert via the same /api/download/mint endpoint used by
+// renewal — Venafi's CKG flow doesn't distinguish "renew" from "new". Caller
+// supplies the form values; this helper handles the body shape, including the
+// hardcoded JH subject defaults and the RSA keyTypeParameters.
+async function realCreateCert(form, settings, passphrase) {
+  const algoMeta = KEY_ALGORITHMS.find(k => k.value === form.keyAlgo) || KEY_ALGORITHMS[0];
+  const cn       = form.commonName.trim();
+  const sans     = (form.sanDnsNames && form.sanDnsNames.length) ? form.sanDnsNames : [cn];
+
+  const csrAttrs = {
+    commonName:   cn,
+    ...NEW_CERT_CSR_DEFAULTS,
+    keyTypeParameters: {
+      keyType:   algoMeta.algo,
+      keyLength: algoMeta.size,
+    },
+    subjectAlternativeNamesByType: { dnsNames: sans },
+  };
+
+  return certServiceFetch('/api/download/mint', {
+    certType:    form.certType,
+    commonName:  cn,
+    csrAttrs,
+    passphrase,
+    exportFormat: form.exportFormat || 'PEM',
+    tags:         (form.tags && form.tags.length) ? form.tags : undefined,
+    validity:     form.validity || undefined,
+    apiKey:   settings.vaultToken || undefined,
+    vaultUrl: settings.vaultUrl   || undefined,
+  });
+}
+
+// Retire the old cert in Venafi after a successful renewal so it drops out of
+// the dashboard's ACTIVE search and (with addToBlocklist) can't be re-issued.
+async function realRetireCert(certId, settings) {
+  const res = await fetch(`${CERT_SERVICE_URL}/api/cert/retire`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      certificateIds: [certId],
+      addToBlocklist: true,
+      apiKey:   settings.vaultToken || undefined,
+      vaultUrl: settings.vaultUrl   || undefined,
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.ok) {
+    throw new Error(json.error || `cert_service ${res.status}`);
+  }
+  return json;
+}
+
+// CIT selection: digicert | internal. Inferred from the existing cert's issuer.
+function inferCertType(cert) {
+  const issuer = (cert.issuer || '').toLowerCase();
+  return issuer.includes('digicert') ? 'digicert' : 'internal';
+}
+
+// Tag-based PKCS12 extension override — these product groups consume the
+// keystore as a .pfx (Windows tooling expectation) even though the bytes are
+// identical to a .p12.
+const PFX_EXTENSION_TAGS = new Set([
+  'synergy',
+  'opcon test',
+  'synapsys',
+  'optimus intranet',
+  'synergy esign',
+]);
+
+function pkcs12ExtensionForTags(tags) {
+  const wantsPfx = (Array.isArray(tags) ? tags : []).some(t => PFX_EXTENSION_TAGS.has(String(t).toLowerCase()));
+  return wantsPfx ? 'pfx' : 'p12';
+}
+
+function pkcs12ExtensionForCert(cert) {
+  return pkcs12ExtensionForTags(cert.tags);
+}
+
+// User-defined per-tag preference (set in the New Cert modal). First matching
+// tag wins. Returns 'pem' | 'p12' | 'pfx' or null if no tag has a preference.
+function tagFormatPreference(tags, prefs) {
+  if (!prefs || !tags) return null;
+  for (const t of tags) {
+    const v = prefs[String(t).toLowerCase()];
+    if (v) return v;
+  }
+  return null;
+}
+
+// Map a preference value → Venafi exportFormat ('PEM' | 'PKCS12' downstream).
+// 'p12' and 'pfx' are both PKCS12 — the difference is just the saved extension.
+function exportFormatFromPref(pref) {
+  if (pref === 'pem') return 'PEM';
+  if (pref === 'p12' || pref === 'pfx') return 'PFX';
+  return null;
+}
+
+async function certServiceFetch(path, body) {
+  const res = await fetch(`${CERT_SERVICE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg;
+    try {
+      const data = await res.json();
+      msg = data.error || res.statusText;
+    } catch {
+      msg = await res.text().catch(() => res.statusText);
+    }
+    throw new Error(`cert_service ${res.status}: ${msg}`);
+  }
+  return res.blob();
+}
+
+// ─────────────────────────────────────────────────────────────
+// CERT TYPE / KEY ALGORITHM / CSR DEFAULTS
+// ─────────────────────────────────────────────────────────────
+const KEY_ALGORITHMS = [
+  { value:'RSA_2048', label:'RSA 2048', algo:'RSA', size:2048 },
+  { value:'RSA_4096', label:'RSA 4096', algo:'RSA', size:4096 },
+];
+
+// Hardcoded subject defaults — the Venafi CIT only accepts these specific
+// values (e.g. O ∈ ["JACK HENRY & ASSOCIATES, INC", ...], L="Monett",
+// ST="Missouri"). Surfacing them as fields would just give the user ways to
+// fail; baking them in keeps the form to "what's actually variable".
+const NEW_CERT_CSR_DEFAULTS = {
+  organization: 'JACK HENRY & ASSOCIATES, INC',
+  locality:     'Monett',
+  state:        'Missouri',
+  country:      'US',
+};
+
+const NEW_CERT_TYPES = [
+  { value:'digicert', label:'DigiCert Standard SSL' },
+  { value:'internal', label:'Internal Certificate Request' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// SUB-COMPONENTS
+// ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }) {
+  const map = {
+    Critical: { cls: 'badge-critical', dot: '●', label: 'Critical' },
+    Warning:  { cls: 'badge-warning',  dot: '●', label: 'Warning'  },
+    Healthy:  { cls: 'badge-healthy',  dot: '●', label: 'Healthy'  },
+    Expired:  { cls: 'badge-expired',  dot: '■', label: 'Expired'  },
+  };
+  const cfg = map[status] || map.Healthy;
+  return <span className={`badge ${cfg.cls}`}><span>{cfg.dot}</span>{cfg.label}</span>;
+}
+
+function Logo() {
+  return (
+    <svg className="app-logo" width="145" height="38" viewBox="0 0 290 76" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Optimus">
+      <path d="M115.317 54.37C105.993 54.37 100.85 47.969 100.85 39.903V37.276C100.85 29.247 105.993 22.846 115.317 22.846C124.604 22.846 129.71 29.247 129.71 37.276V39.903C129.71 47.969 124.567 54.37 115.317 54.37ZM106.215 40.236C106.215 45.416 108.99 49.745 115.317 49.745C121.607 49.745 124.382 45.416 124.382 40.236V36.943C124.382 31.837 121.607 27.471 115.317 27.471C108.99 27.471 106.215 31.837 106.215 36.906V40.236ZM139.478 29.95V33.169C140.662 31.43 143.03 29.58 147.1 29.58C153.723 29.58 157.756 34.205 157.756 40.717V43.344C157.756 49.745 153.686 54.37 147.174 54.37C143.141 54.37 140.699 52.52 139.478 50.892V62.584H134.483V29.95H139.478ZM139.478 44.01C139.774 47.414 141.883 50.041 146.064 50.041C150.615 50.041 152.613 46.896 152.613 43.122V40.828C152.613 37.128 150.578 33.909 146.027 33.909C141.92 33.909 139.774 36.536 139.478 39.977V44.01ZM178.527 29.95V34.279H170.868V45.86C170.868 48.82 171.386 49.671 173.384 49.671H178.527V54H172.274C167.168 54 165.91 51.447 165.91 46.822V34.279H159.657V29.95H162.469C165.651 29.839 166.576 27.582 166.502 23.216H171.46C171.46 26.694 170.757 29.469 168.981 29.95H178.527ZM183.171 29.95H188.166V54H183.171V29.95ZM182.542 25.362C182.542 23.845 183.578 22.846 185.65 22.846C187.759 22.846 188.795 23.845 188.795 25.362C188.795 26.731 187.759 27.804 185.65 27.804C183.578 27.804 182.542 26.731 182.542 25.362ZM224.25 39.607C224.25 36.832 223.436 33.872 219.44 33.872C214.852 33.872 214.112 37.683 214.112 39.681V54H209.117V39.607C209.117 36.906 208.303 33.872 204.307 33.872C199.756 33.872 198.979 37.683 198.979 39.681V54H193.984V29.95H198.979V32.947C200.422 30.727 202.605 29.58 205.676 29.58C209.561 29.58 211.855 31.356 213.039 33.798C214.482 31.356 216.924 29.58 220.698 29.58C226.433 29.58 229.245 33.502 229.245 38.682V54H224.25V39.607ZM251.324 54V49.967C249.733 52.52 247.143 54.37 243.258 54.37C237.819 54.37 234.526 50.633 234.526 44.565V29.95H239.521V44.01C239.521 47.932 241.334 50.078 245.108 50.078C250.288 50.078 251.287 46.045 251.287 43.714L251.324 44.343V29.95H256.319V54H251.324ZM276.911 40.273C282.091 41.346 283.386 43.788 283.386 46.896C283.386 51.151 281.018 54.37 272.508 54.37C263.665 54.37 260.779 51.188 260.779 45.786V45.157H265.959V45.749C265.959 49.079 268.105 50.115 272.471 50.115C276.837 50.115 278.243 49.042 278.243 47.192C278.243 45.564 277.022 44.713 274.284 44.047L268.66 42.9C263.073 41.938 261.556 39.533 261.556 36.536C261.556 32.762 264.035 29.58 271.805 29.58C280.241 29.58 282.757 33.021 282.757 37.461V38.016H277.577V37.498C277.577 34.686 275.616 33.835 271.805 33.835C269.03 33.835 266.736 34.464 266.736 36.277C266.736 37.572 267.735 38.312 270.325 38.867L276.911 40.273Z" fill="white"/>
+      <path fillRule="evenodd" clipRule="evenodd" d="M38.6137 62.8475C38.6137 66.8963 35.3315 70.1785 31.2827 70.1785H21.0065C12.1664 70.1785 5 63.0121 5 54.172V21.0065C5 12.1664 12.1664 5 21.0065 5H42.3912C48.8975 5 54.172 10.2744 54.172 16.7808C54.172 19.256 56.1786 21.2626 58.6538 21.2626C65.0187 21.2626 70.1785 26.4224 70.1785 32.7873V44.6001C70.1785 48.6489 66.8963 51.9311 62.8475 51.9311C58.7987 51.9311 55.5165 48.6489 55.5165 44.6001V24.1438C55.5165 21.6685 53.51 19.662 51.0347 19.662H24.1438C21.6685 19.662 19.662 21.6685 19.662 24.1438V51.0347C19.662 53.51 21.6685 55.5165 24.1438 55.5165H31.2827C35.3315 55.5165 38.6137 58.7987 38.6137 62.8475Z" fill="url(#optimus-logo-grad)"/>
+      <defs>
+        <linearGradient id="optimus-logo-grad" x1="-24.7724" y1="38.5282" x2="38.5282" y2="101.829" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#304EEB"/>
+          <stop offset="1" stopColor="#E164EF"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+function EyeIcon({ visible }) {
+  if (visible) return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+      <line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  );
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  );
+}
+
+function CopyBtn({ text, label = 'Copy', copiedLabel = 'Copied!' }) {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    await copyToClipboard(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy}>
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}
+
+function PassphraseField({ passphrase, onChange, disabled }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <div className="passphrase-field">
+        <input
+          type={show ? 'text' : 'password'}
+          className="passphrase-input"
+          value={passphrase}
+          onChange={onChange ? e => onChange(e.target.value) : undefined}
+          readOnly={!onChange}
+          disabled={disabled}
+          spellCheck={false}
+          autoComplete="new-password"
+        />
+        <button className="eye-btn" onClick={() => setShow(s => !s)} title={show ? 'Hide' : 'Show'} type="button">
+          <EyeIcon visible={show} />
+        </button>
+        <CopyBtn text={passphrase} />
+      </div>
+      <div className="passphrase-warning">
+        <span>⚠</span>
+        <span>
+          {onChange
+            ? 'Auto-generated password — save it before closing; it will not be shown again.'
+            : 'Save this passphrase — it will not be shown again.'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LogEntry({ entry }) {
+  const ts = new Date(entry.timestamp);
+  const timeStr = ts.toTimeString().slice(0,8) + '.' + String(ts.getMilliseconds()).padStart(3,'0');
+  return (
+    <div className="log-entry">
+      <span className="log-ts">{timeStr}</span>
+      <span className={`log-level level-${entry.level}`}>[{entry.level}]</span>
+      <span className={`log-msg level-${entry.level}`}>{entry.message}</span>
+    </div>
+  );
+}
+
+function ActivityLog({ logEntries, logState, setLogState, onClear }) {
+  const bottomRef = useRef(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const collapsed = logState === 'collapsed';
+  const expanded  = logState === 'expanded';
+
+  useEffect(() => {
+    if (collapsed) return;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logEntries.length, collapsed]);
+
+  function handleCopyLog() {
+    const text = logEntries.map(e => `${new Date(e.timestamp).toISOString()} [${e.level}] ${e.message}`).join('\n');
+    copyToClipboard(text);
+  }
+
+  function handleExportLog() {
+    const text = logEntries.map(e => `${new Date(e.timestamp).toISOString()} [${e.level}] ${e.message}`).join('\n');
+    downloadTextFile(text, `certmanager-log-${Date.now()}.txt`);
+  }
+
+  const lastEntry = logEntries[logEntries.length - 1] || null;
+
+  return (
+    <div className={`log-panel ${expanded ? 'expanded' : ''} ${collapsed ? 'collapsed' : ''}`}>
+      {collapsed ? (
+        <div className="log-status-bar" onClick={() => setLogState('normal')} title="Click to expand activity log">
+          <span className="log-status-label">
+            <span className={`log-status-dot${lastEntry ? ` dot-${lastEntry.level}` : ''}`} />
+            ACTIVITY
+          </span>
+          {lastEntry ? (
+            <span className={`log-status-msg msg-${lastEntry.level}`}>
+              {lastEntry.message}
+            </span>
+          ) : (
+            <span className="log-status-msg">No entries yet</span>
+          )}
+          <div className="log-status-right" onClick={e => e.stopPropagation()}>
+            <span className="log-count-pill">{logEntries.length}</span>
+            <button className="log-expand-chevron" onClick={() => setLogState('normal')} title="Expand log">▴</button>
+          </div>
+        </div>
+      ) : (
+        <div className="log-header">
+          <div className="log-header-left">
+            <span className="log-title">Activity Log</span>
+            <span className="log-badge">{logEntries.length}</span>
+          </div>
+          <div className="log-header-right">
+            <button className="btn btn-ghost btn-xs" onClick={handleCopyLog}>Copy Log</button>
+            <button className="btn btn-ghost btn-xs" onClick={handleExportLog}>Export</button>
+            {confirmClear ? (
+              <>
+                <span style={{fontSize:11,color:'var(--text-muted)'}}>Confirm clear?</span>
+                <button className="btn btn-danger btn-xs" onClick={() => { onClear(); setConfirmClear(false); }}>Yes</button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setConfirmClear(false)}>No</button>
+              </>
+            ) : (
+              <button className="btn btn-ghost btn-xs" onClick={() => setConfirmClear(true)}>Clear</button>
+            )}
+            <button className="btn btn-ghost btn-xs" onClick={() => setLogState(expanded ? 'normal' : 'expanded')}>
+              {expanded ? '⊟ Collapse' : '⊞ Expand'}
+            </button>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setLogState('collapsed')}
+              title="Minimize to status bar"
+            >
+              ▾ Minimize
+            </button>
+          </div>
+        </div>
+      )}
+      {!collapsed && (
+        <div className="log-entries">
+          {logEntries.length === 0 && (
+            <div style={{color:'var(--text-dim)',fontStyle:'italic',padding:'8px 0',fontSize:11}}>
+              No log entries yet. Actions will appear here.
+            </div>
+          )}
+          {logEntries.map(entry => <LogEntry key={entry.id} entry={entry} />)}
+          <div ref={bottomRef} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CertManageModal({ cert, passphrase, settings, addLog, onUpdateCert, onClose, onRequestRefresh }) {
+  if (!cert) return null;
+
+  // All actions are explicit opt-in — nothing is pre-selected on open.
+  const [includeRenew,    setIncludeRenew]    = useState(false);
+  const [includeDownload, setIncludeDownload] = useState(false);
+  // Default export format: tag preference wins (set via the New Cert modal),
+  // then DigiCert→PEM heuristic, then PFX for everything else.
+  const [exportFormat,    setExportFormat]    = useState(() => {
+    const fromPref = exportFormatFromPref(
+      tagFormatPreference(cert.tags, settings.tagFormatPreferences)
+    );
+    return fromPref || (inferCertType(cert) === 'digicert' ? 'PEM' : 'PFX');
+  });
+  const [running,  setRunning]  = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [steps,    setSteps]    = useState([]);
+  // Editable copy of the auto-generated passphrase. Reseeds when the prop
+  // changes (e.g. opening the modal on a different cert).
+  const [passphraseDraft, setPassphraseDraft] = useState(passphrase);
+  useEffect(() => { setPassphraseDraft(passphrase); }, [passphrase]);
+
+  const isExpired  = cert.daysRemaining < 0;
+  const isCritical = cert.daysRemaining <= 7 && cert.daysRemaining >= 0;
+  const isPEM      = exportFormat === 'PEM';
+
+  function markStep(id, patch) { setSteps(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s)); }
+
+  // Auto-check Download whenever Renew is turned on — renewing without
+  // delivering the new keystore is rarely useful. The user can still uncheck
+  // Download manually after the fact.
+  useEffect(() => {
+    if (includeRenew && !includeDownload) setIncludeDownload(true);
+  }, [includeRenew]);
+
+  async function handleStart() {
+    const isLive = !!(settings.vaultUrl && settings.vaultToken);
+    // When live + both renew and download are checked, the two operations collapse
+    // into a single Venafi mint_and_download call (CKG mints a fresh cert and the
+    // same call returns its keystore). The UI shows them as one combined step.
+    const combinedMint = isLive && includeRenew && includeDownload;
+
+    const plan = [
+      ...(combinedMint
+        ? [{ id:'renew-download', label:`Renew + download (${exportFormat})`, status:'running', message:'' }]
+        : [
+            ...(includeRenew    ? [{ id:'renew',    label:'Renew Certificate',                          status:'running', message:'' }] : []),
+            ...(includeDownload ? [{ id:'download', label:`Download ${exportFormat} bundle`,            status:'pending', message:'' }] : []),
+          ]
+      ),
+    ];
+    setSteps(plan);
+    setRunning(true);
+
+    // ── Combined: Renew + Download (live mint_and_download flow) ──
+    if (combinedMint) {
+      const t0 = Date.now();
+      addLog('INFO', `[${cert.name}] Mint + download via Venafi CKG (cert_type=${inferCertType(cert)})…`);
+      try {
+        const blob = await realMintAndDownload(cert, exportFormat, settings, passphraseDraft);
+        addLog('API',     `POST ${CERT_SERVICE_URL}/api/download/mint → 200 OK (${Date.now()-t0}ms)`);
+        addLog('SUCCESS', `[${cert.name}] New certificate minted. Passphrase: [REDACTED]`);
+        const certPref = tagFormatPreference(cert.tags, settings.tagFormatPreferences);
+        const mintExt = certPref || (isPEM ? 'pem' : pkcs12ExtensionForCert(cert));
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href=url; a.download=`${cert.name}.${mintExt}`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        addLog('SUCCESS', `[${cert.name}] Downloaded — ${cert.name}.${mintExt}`);
+        const d = new Date(); d.setFullYear(d.getFullYear()+1);
+        onUpdateCert(cert.id, {
+          renewedAt:Date.now(), downloadedAt:Date.now(),
+          status:'Healthy', daysRemaining:365, expirationDate:d.toISOString().slice(0,10),
+        });
+        markStep('renew-download', { status:'done', message:`${cert.name}.${mintExt} saved — renewed 365d` });
+
+        // Retire the old cert so it drops out of the dashboard's ACTIVE search.
+        // Best-effort — a retire failure does NOT roll back the renewal.
+        try {
+          addLog('INFO', `[${cert.name}] Retiring old certificate ${cert.id}…`);
+          const tR = Date.now();
+          await realRetireCert(cert.id, settings);
+          addLog('API',     `POST ${CERT_SERVICE_URL}/api/cert/retire → 200 OK (${Date.now()-tR}ms) — ${cert.id}`);
+          addLog('SUCCESS', `[${cert.name}] Old certificate retired`);
+        } catch (err) {
+          addLog('WARNING', `[${cert.name}] Old certificate retirement failed: ${err.message} (renewed cert is still valid; retire manually in Venafi)`);
+        }
+        // Refresh the dashboard so the retired cert disappears and the new
+        // cert appears (assuming it matches the configured DNS hostname filter).
+        if (onRequestRefresh) onRequestRefresh();
+      } catch (err) {
+        addLog('ERROR', `[${cert.name}] Mint + download failed: ${err.message}`);
+        markStep('renew-download', { status:'error', message:err.message });
+        setRunning(false); return;
+      }
+    } else {
+      // ── Renew (separate, mock-only path — live renew without download is intentionally
+      //    not wired here; minting without delivering the keystore wastes the new cert) ──
+      if (includeRenew) {
+        addLog('INFO', `[${cert.name}] Initiating certificate renewal…`);
+        const t0 = Date.now();
+        try {
+          await mockRenewCert(cert.id, passphraseDraft);
+          addLog('API',     `POST /api/v1/certificates/${cert.id}/renew → 200 OK (${Date.now()-t0}ms)`);
+          addLog('SUCCESS', `[${cert.name}] Certificate renewed. Passphrase: [REDACTED]`);
+          const d = new Date(); d.setFullYear(d.getFullYear()+1);
+          onUpdateCert(cert.id, { renewedAt:Date.now(), status:'Healthy', daysRemaining:365, expirationDate:d.toISOString().slice(0,10) });
+          markStep('renew', { status:'done', message:'Renewed — 365 days remaining' });
+        } catch (err) {
+          addLog('ERROR', `[${cert.name}] Renewal failed: ${err.message}`);
+          markStep('renew', { status:'error', message:err.message });
+          setRunning(false); return;
+        }
+      }
+
+      // ── Download (download_existing on live, mock blob otherwise) ──
+      if (includeDownload) {
+        markStep('download', { status:'running' });
+        addLog('INFO', `[${cert.name}] Requesting ${exportFormat} export…`);
+        const t1 = Date.now();
+        try {
+          const blob = isLive
+            ? await realExportCert(cert, exportFormat, settings, passphraseDraft)
+            : await mockExportCert(cert.id, exportFormat);
+          addLog('API', isLive
+            ? `POST ${CERT_SERVICE_URL}/api/download/existing → 200 OK (${Date.now()-t1}ms)`
+            : `GET /api/v1/certificates/${cert.id}/export?format=${exportFormat} → 200 OK (${Date.now()-t1}ms)`
+          );
+          // Live path: PEM → assembled single .pem bundle (cert + chain + key);
+          // PFX/PKCS12 → raw binary keystore. Extension priority: user tag
+          // preference → built-in PFX override list → format default.
+          // Mock path emits a single-file PEM/PFX for offline POC use.
+          const certPref = tagFormatPreference(cert.tags, settings.tagFormatPreferences);
+          const ext = certPref || (isPEM ? 'pem' : (isLive ? pkcs12ExtensionForCert(cert) : 'pfx'));
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href=url; a.download=`${cert.name}.${ext}`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+          addLog('SUCCESS', `[${cert.name}] Downloaded — ${cert.name}.${ext}`);
+          onUpdateCert(cert.id, { downloadedAt:Date.now() });
+          markStep('download', { status:'done', message:`${cert.name}.${ext} saved` });
+        } catch (err) {
+          addLog('ERROR', `[${cert.name}] Export failed: ${err.message}`);
+          markStep('download', { status:'error', message:err.message });
+          setRunning(false); return;
+        }
+      }
+    }
+
+    setRunning(false);
+    setFinished(true);
+  }
+
+  function StepIcon({ status }) {
+    if (status === 'running') return <span className="spinner" style={{display:'inline-block',width:13,height:13,borderWidth:2,borderTopColor:'var(--secondary)',margin:0}} />;
+    if (status === 'done')    return <span style={{color:'var(--status-healthy)'}}>✓</span>;
+    if (status === 'error')   return <span style={{color:'var(--status-expired)'}}>✗</span>;
+    return <span style={{color:'var(--text-dim)'}}>○</span>;
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => !running && e.target === e.currentTarget && onClose()}>
+      <div className="modal-box" style={{maxWidth:600}}>
+        <div className="modal-title">Manage Certificate</div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:12,marginBottom:14,alignItems:'start'}}>
+          <div>
+            <div className="modal-label">Certificate</div>
+            <div className="modal-value">{cert.name}</div>
+          </div>
+          <div style={{display:'flex',gap:16,textAlign:'right'}}>
+            <div>
+              <div className="modal-label">Expiration</div>
+              <div className="modal-value" style={{fontSize:12}}>{formatExpirationDate(cert.expirationDate)}</div>
+            </div>
+            <div>
+              <div className="modal-label">Days</div>
+              <div className={`modal-value days-${cert.status.toLowerCase()}`}>
+                {cert.daysRemaining < 0 ? `${cert.daysRemaining}` : `+${cert.daysRemaining}`}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {(isExpired || isCritical) && (
+          <div className="expiry-warning" style={{marginBottom:14}}>
+            <span>⚠</span>
+            <span>{isExpired
+              ? `Expired ${Math.abs(cert.daysRemaining)} days ago — no longer valid.`
+              : `Expires in ${cert.daysRemaining} day${cert.daysRemaining!==1?'s':''} — renewal urgent.`}
+            </span>
+          </div>
+        )}
+
+        {!finished && (
+          <>
+            <hr className="modal-divider" />
+            <div className="manage-section-label" style={{marginBottom:8}}>Auto-Generated Passphrase</div>
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <PassphraseField
+                passphrase={passphraseDraft}
+                onChange={setPassphraseDraft}
+                disabled={running}
+              />
+            </div>
+
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={includeRenew} onChange={e => !running && setIncludeRenew(e.target.checked)} disabled={running} />
+                <span className="checkbox-label" style={{fontWeight:600}}>Renew Certificate</span>
+              </label>
+              {includeRenew && includeDownload && (
+                <div style={{fontSize:11,color:'var(--text-dim)',marginTop:6,fontFamily:'DM Mono,monospace'}}>
+                  Renew + Download together mints a fresh certificate via Cloud Key Generation and returns its keystore.
+                </div>
+              )}
+            </div>
+
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <label className="checkbox-row" style={{marginBottom: includeDownload ? 12 : 0}}>
+                <input type="checkbox" checked={includeDownload} onChange={e => !running && setIncludeDownload(e.target.checked)} disabled={running} />
+                <span className="checkbox-label" style={{fontWeight:600}}>Download Certificate</span>
+              </label>
+              {includeDownload && (
+                <>
+                  <div className="manage-section-label" style={{marginTop:8,marginBottom:6}}>Export Format</div>
+                  <div style={{display:'flex',gap:8}}>
+                    {['PFX','PEM'].map(fmt => (
+                      <label key={fmt} style={{
+                        display:'flex', alignItems:'center', gap:7, cursor:running?'not-allowed':'pointer',
+                        flex:1, padding:'7px 12px',
+                        background: exportFormat===fmt ? 'rgba(123,53,221,0.12)' : 'var(--bg-input)',
+                        border: `1px solid ${exportFormat===fmt ? 'var(--secondary)' : 'var(--border)'}`,
+                        borderRadius:5, transition:'all 0.15s',
+                      }}>
+                        <input type="radio" name="exportFormat" value={fmt} checked={exportFormat===fmt} onChange={() => !running && setExportFormat(fmt)} disabled={running} style={{accentColor:'var(--secondary)'}} />
+                        <span style={{fontSize:13,fontFamily:'DM Mono,monospace',color:'var(--text-primary)'}}>
+                          {fmt==='PFX' ? 'PFX / PKCS#12' : 'PEM / X.509'}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{fontSize:11,color:'var(--text-dim)',marginTop:6,fontFamily:'DM Mono,monospace'}}>
+                    {isPEM ? 'Exports certificate + encrypted private key as Base64 PEM blocks.' : 'Exports certificate + private key as a password-protected binary bundle.'}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Deploy stage temporarily disabled — see ./deploy_future/ */}
+          </>
+        )}
+
+        {steps.length > 0 && (
+          <>
+            <hr className="modal-divider" />
+            <div className="manage-section-label">Progress</div>
+            <div className="manage-step-list">
+              {steps.map(s => (
+                <div key={s.id} className="manage-step">
+                  <div className="manage-step-icon"><StepIcon status={s.status} /></div>
+                  <div>
+                    <div className="manage-step-label">{s.label}</div>
+                    {s.message && <div className="manage-step-msg">{s.message}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose} disabled={running}>{finished ? 'Close' : 'Cancel'}</button>
+          {!finished && (
+            <button className="btn btn-primary" onClick={handleStart}
+              disabled={running || (!includeRenew && !includeDownload)}>
+              {running ? <><span className="spinner" /> Running…</> : '▶ Start'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewCertModal({ addLog, settings, existingTags, onCertIssued, onSetTagPreference, onClose }) {
+  const [certType,      setCertType]      = useState('digicert');
+  const [commonName,    setCommonName]    = useState('');
+  const [validityDays,  setValidityDays]  = useState(365);
+  const [keyAlgo,       setKeyAlgo]       = useState('RSA_2048');
+  const [selectedTags,  setSelectedTags]  = useState([]);
+  const [customTagInput, setCustomTagInput] = useState('');
+  const [customTagFormat, setCustomTagFormat] = useState('p12');
+  const [showAddTag,    setShowAddTag]    = useState(false);
+  const [submitting,    setSubmitting]    = useState(false);
+  const [done,          setDone]          = useState(false);
+  const [newCertName,   setNewCertName]   = useState('');
+  // Blob + filename held back from auto-download; user clicks Download on the
+  // success screen if they want to save the keystore.
+  const [issuedKeystore, setIssuedKeystore] = useState(null); // { blob, filename }
+  const [issuedDownloaded, setIssuedDownloaded] = useState(false);
+  // Passphrase shown to the user on the success screen so they can copy it
+  // before closing — same UX as Manage → renewal.
+  const [issuedPassphrase, setIssuedPassphrase] = useState('');
+
+  const isLive = !!(settings.vaultUrl && settings.vaultToken);
+
+  // Resolve export format: tag preference (if any selected tag has one) wins,
+  // otherwise fall back to cert-type heuristic (DigiCert → PEM, Internal → PFX).
+  const tagPref      = tagFormatPreference(selectedTags, settings.tagFormatPreferences);
+  const tagPrefFmt   = exportFormatFromPref(tagPref);
+  const exportFormat = tagPrefFmt || (certType === 'digicert' ? 'PEM' : 'PFX');
+
+  // Combine known existing tags + any custom tags the user has added in this
+  // session, deduped, sorted, case-insensitive.
+  const tagOptions = React.useMemo(() => {
+    const seen = new Map();
+    const add = t => {
+      const key = String(t).toLowerCase();
+      if (key && !seen.has(key)) seen.set(key, t);
+    };
+    (existingTags || []).forEach(add);
+    selectedTags.forEach(add);
+    return Array.from(seen.values()).sort((a,b) => a.localeCompare(b));
+  }, [existingTags, selectedTags]);
+
+  function toggleTag(tag) {
+    setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+  }
+
+  function addCustomTag() {
+    const t = customTagInput.trim();
+    if (!t) return;
+    if (!selectedTags.some(s => s.toLowerCase() === t.toLowerCase())) {
+      setSelectedTags(prev => [...prev, t]);
+    }
+    if (onSetTagPreference) onSetTagPreference(t, customTagFormat);
+    addLog('INFO', `Tag "${t}" preferred download format set to .${customTagFormat}.`);
+    setCustomTagInput('');
+    setCustomTagFormat('p12');
+    setShowAddTag(false);
+  }
+
+  const validValidity = Number.isFinite(validityDays) && validityDays >= 1 && validityDays <= 365;
+  const canSubmit = !!(certType && commonName.trim() && keyAlgo && validValidity && !submitting);
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+
+    const cn         = commonName.trim();
+    const passphrase = generatePassphrase();
+    const validity   = `P${validityDays}D`;
+    const algoMeta   = KEY_ALGORITHMS.find(k => k.value === keyAlgo);
+
+    addLog('INFO', `New cert request: CN=${cn}, type=${certType}, algo=${algoMeta.label}, validity=${validityDays}d`);
+
+    if (!isLive) {
+      addLog('ERROR', 'Live mode required — set Cloud Base URL + API Key in Settings.');
+      setSubmitting(false);
+      return;
+    }
+
+    const t0 = Date.now();
+    try {
+      const blob = await realCreateCert(
+        { certType, commonName: cn, keyAlgo, validity, exportFormat, tags: selectedTags },
+        settings,
+        passphrase,
+      );
+      addLog('API',     `POST ${CERT_SERVICE_URL}/api/download/mint → 200 OK (${Date.now()-t0}ms)`);
+      addLog('SUCCESS', `Certificate issued: CN=${cn}. Passphrase: [REDACTED]`);
+
+      // Stash the keystore for an optional user-initiated download. Extension
+      // priority: explicit tag preference → tag-based PFX override → format default.
+      const isPEM = exportFormat === 'PEM';
+      const ext   = tagPref || (isPEM ? 'pem' : pkcs12ExtensionForTags(selectedTags));
+      setIssuedKeystore({ blob, filename: `${cn}.${ext}` });
+      setIssuedPassphrase(passphrase);
+
+      setNewCertName(cn);
+      setDone(true);
+
+      // Tell the App: append CN to dnsHostnames + refresh the dashboard so the
+      // new cert appears.
+      if (onCertIssued) onCertIssued(cn);
+    } catch (err) {
+      addLog('ERROR', `Certificate request failed: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => !submitting && e.target === e.currentTarget && onClose()}>
+      <div className="modal-box" style={{maxWidth:600}}>
+        <div className="modal-title">New Certificate Request</div>
+
+        {done ? (
+          <div className="ncr-success">
+            <div className="ncr-success-icon">✓</div>
+            <div className="ncr-success-title">Certificate Issued</div>
+            <div className="ncr-success-id">CN={newCertName} has been added to the dashboard.</div>
+            {issuedPassphrase && (
+              <div style={{marginTop:18,textAlign:'left'}}>
+                <div className="manage-section-label" style={{marginBottom:6}}>Auto-Generated Passphrase</div>
+                <PassphraseField passphrase={issuedPassphrase} />
+              </div>
+            )}
+            {issuedKeystore && (
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8,marginTop:18}}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    const url = URL.createObjectURL(issuedKeystore.blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = issuedKeystore.filename;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                    addLog('SUCCESS', `Downloaded — ${issuedKeystore.filename}`);
+                    setIssuedDownloaded(true);
+                  }}
+                >
+                  ⬇ Download {issuedKeystore.filename}
+                </button>
+                <div style={{fontSize:11,color:'var(--text-dim)',fontFamily:'DM Mono,monospace'}}>
+                  {issuedDownloaded
+                    ? 'Saved. The keystore is also retrievable from the dashboard via Manage → Download.'
+                    : 'Skip this and the keystore is gone — re-download via Manage → Download on the dashboard.'}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {!isLive && (
+              <div className="expiry-warning" style={{marginBottom:14}}>
+                <span>⚠</span>
+                <span>Configure Cloud Base URL + API Key in Settings to issue real certificates.</span>
+              </div>
+            )}
+
+            {/* ── Common Name ── */}
+            <div className="manage-section-label" style={{marginBottom:6}}>Common Name (CN) *</div>
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <input
+                className="deploy-input" style={{width:'100%'}}
+                placeholder="hostname.jhacorp.com"
+                value={commonName}
+                onChange={e => setCommonName(e.target.value)}
+                disabled={submitting}
+              />
+              <div style={{fontSize:10,color:'var(--text-dim)',marginTop:5,fontFamily:'DM Mono,monospace'}}>
+                SAN auto-populated to match. CN will be added to the dashboard's DNS hostname filter on success.
+              </div>
+            </div>
+
+            {/* ── Cert Type ── */}
+            <div className="manage-section-label" style={{marginBottom:6}}>Issuing Template</div>
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <div className="ncr-algo-grid">
+                {NEW_CERT_TYPES.map(t => (
+                  <div key={t.value} className={`ncr-algo-btn ${certType===t.value?'selected':''}`}
+                       onClick={() => !submitting && setCertType(t.value)}>
+                    {t.label}
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:10,color:'var(--text-dim)',marginTop:5,fontFamily:'DM Mono,monospace'}}>
+                {certType === 'digicert'
+                  ? 'DigiCert Standard SSL — public CA, default export PEM.'
+                  : 'Internal CA — default export PFX/PKCS12.'}
+              </div>
+            </div>
+
+            {/* ── Validity ── */}
+            <div className="manage-section-label" style={{marginBottom:6}}>Validity Period (1–365 days)</div>
+            <div className="manage-option-block" style={{marginBottom:10,display:'flex',gap:6,alignItems:'stretch'}}>
+              <input
+                type="number" min="1" max="365"
+                className="deploy-input" style={{flex:'0 0 120px',textAlign:'center'}}
+                value={validityDays}
+                onChange={e => setValidityDays(parseInt(e.target.value, 10) || 0)}
+                disabled={submitting}
+              />
+              <div style={{display:'flex',gap:6,flex:'1 1 0',minWidth:0}}>
+                {[30, 90, 180, 365].map(d => (
+                  <button key={d} type="button"
+                          className={`ncr-algo-btn ${validityDays===d?'selected':''}`}
+                          style={{flex:'1 1 0',minWidth:0,padding:'6px 10px',fontSize:12}}
+                          onClick={() => !submitting && setValidityDays(d)}>
+                    {d}d
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Key Algorithm ── */}
+            <div className="manage-section-label" style={{marginBottom:6}}>Key Algorithm</div>
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <div className="ncr-algo-grid">
+                {KEY_ALGORITHMS.map(k => (
+                  <div key={k.value} className={`ncr-algo-btn ${keyAlgo===k.value?'selected':''}`}
+                       onClick={() => !submitting && setKeyAlgo(k.value)}>
+                    {k.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Tags ── */}
+            <div className="manage-section-label" style={{marginBottom:6}}>Certificate Tags</div>
+            <div className="manage-option-block" style={{marginBottom:10}}>
+              <div className="ncr-tag-picker">
+                {tagOptions.map(tag => (
+                  <span key={tag} className={`ncr-tag ${selectedTags.includes(tag)?'selected':''}`}
+                        onClick={() => !submitting && toggleTag(tag)}>
+                    {tag}
+                  </span>
+                ))}
+                {!showAddTag && (
+                  <span className="ncr-tag" onClick={() => !submitting && setShowAddTag(true)}
+                        style={{borderStyle:'dashed'}}>+ New tag</span>
+                )}
+              </div>
+              {showAddTag && (
+                <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:10,padding:10,background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:5}}>
+                  <input
+                    className="deploy-input"
+                    placeholder="Tag name"
+                    value={customTagInput}
+                    onChange={e => setCustomTagInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomTag(); } }}
+                    autoFocus
+                    disabled={submitting}
+                  />
+                  <div>
+                    <div style={{fontSize:11,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.5px',fontWeight:600,marginBottom:6}}>
+                      Preferred download format for certs with this tag
+                    </div>
+                    <div style={{display:'flex',gap:6,justifyContent:'center'}}>
+                      {[
+                        { value:'pem', label:'.pem' },
+                        { value:'p12', label:'.p12' },
+                        { value:'pfx', label:'.pfx' },
+                      ].map(f => (
+                        <button key={f.value} type="button"
+                                className={`ncr-algo-btn ${customTagFormat===f.value?'selected':''}`}
+                                style={{padding:'6px 14px',fontSize:12,minWidth:80}}
+                                onClick={() => !submitting && setCustomTagFormat(f.value)}>
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setShowAddTag(false); setCustomTagInput(''); }} disabled={submitting}>Cancel</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={addCustomTag} disabled={!customTagInput.trim() || !customTagFormat || submitting}>Add Tag</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose} disabled={submitting}>{done ? 'Close' : 'Cancel'}</button>
+          {!done && (
+            <button className="btn btn-primary" onClick={handleSubmit} disabled={!canSubmit}>
+              {submitting ? <><span className="spinner" /> Submitting…</> : '⊕ Submit Request'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const COLUMNS = [
+  { key:'name',           label:'Certificate Name', sortable:true  },
+  { key:'tags',           label:'Tags',              sortable:false },
+  { key:'expirationDate', label:'Expiration',        sortable:true  },
+  { key:'daysRemaining',  label:'Days',              sortable:true  },
+  { key:'status',         label:'Status',            sortable:true  },
+  { key:'actions',        label:'Actions',           sortable:false },
+];
+
+function CertRow({ cert, onManage }) {
+  const daysClass = cert.status === 'Critical' ? 'days-critical' : cert.status === 'Warning' ? 'days-warning' : cert.status === 'Expired' ? 'days-expired' : 'days-healthy';
+  const daysLabel = cert.daysRemaining < 0 ? `${cert.daysRemaining}d` : `+${cert.daysRemaining}d`;
+  const H24 = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const showRenewed    = cert.renewedAt    && (now - cert.renewedAt)    < H24;
+  const showDownloaded = cert.downloadedAt && (now - cert.downloadedAt) < H24;
+  const showDeployed   = cert.deployedAt   && (now - cert.deployedAt)   < H24;
+  const fullyComplete  = !!(cert.renewedAt && cert.downloadedAt && cert.deployedAt);
+  return (
+    <tr className={`cert-row cert-row-${cert.status.toLowerCase()}`}>
+      <td className="cert-td">
+        <div className="cert-name">{cert.name}</div>
+        {(showRenewed || showDownloaded || showDeployed) && (
+          <div style={{display:'flex',gap:4,flexWrap:'wrap',marginTop:5}}>
+            {showRenewed    && <span className="status-chip chip-renewed">✓ Renewed</span>}
+            {showDownloaded && <span className="status-chip chip-downloaded">⬇ Downloaded</span>}
+            {showDeployed   && <span className="status-chip chip-deployed">⚡ Deployed</span>}
+          </div>
+        )}
+      </td>
+      <td className="cert-td">
+        <div className="sans-list">
+          {cert.tags.map(t => <span key={t} className="sans-tag">{t}</span>)}
+        </div>
+      </td>
+      <td className="cert-td"><div className="expiry-date">{formatExpirationDate(cert.expirationDate)}</div></td>
+      <td className="cert-td"><div className={`days-remaining ${daysClass}`}>{daysLabel}</div></td>
+      <td className="cert-td"><StatusBadge status={cert.status} /></td>
+      <td className="cert-td">
+        <div className="action-cell">
+          <button className="btn btn-secondary btn-sm" onClick={() => onManage(cert.id)}>
+            ⚙ Manage
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function CertTableSkeleton() {
+  const widths = [
+    ['70%','40%','55%','30%','—','—'],
+    ['60%','30%','65%','25%','—','—'],
+    ['75%','50%','45%','35%','—','—'],
+    ['55%','45%','58%','28%','—','—'],
+  ];
+  return (
+    <>
+      {widths.map((row, ri) => (
+        <tr key={ri} className="skeleton-row" style={{animationDelay:`${ri*0.06}s`}}>
+          <td><div className="skeleton" style={{width:row[0]}} /></td>
+          <td><div className="skeleton skeleton-tag" style={{width:'50px'}} /></td>
+          <td><div className="skeleton" style={{width:row[2]}} /></td>
+          <td><div className="skeleton" style={{width:'36px'}} /></td>
+          <td><div className="skeleton" style={{width:'64px',height:'18px',borderRadius:'4px'}} /></td>
+          <td><div className="skeleton" style={{width:'72px',height:'24px',borderRadius:'5px'}} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function CertTableEmpty({ hasFilter }) {
+  return (
+    <tr>
+      <td colSpan={COLUMNS.length} className="empty-state-cell">
+        <svg className="empty-state-icon" width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="7" y="3" width="22" height="28" rx="3" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+          <path d="M12 10h12M12 15h12M12 20h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          <circle cx="29" cy="29" r="8" fill="var(--bg-surface)" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M26 29h6M29 26v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+        <div className="empty-state-title">
+          {hasFilter ? 'No certificates match this filter' : 'No certificates found'}
+        </div>
+        <div className="empty-state-sub">
+          {hasFilter ? 'Try a different status filter or refresh the list' : 'Configure your DNS hostnames in Settings to load certificates'}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function CertTable({ certs, sortConfig, onSort, onManage, loading, statusFilter }) {
+  const sorted = [...certs].sort((a,b) => {
+    const k = sortConfig.key;
+    if (!k || k === 'actions' || k === 'sans') return 0;
+    const cmp = typeof a[k] === 'number' ? a[k]-b[k] : String(a[k]).localeCompare(String(b[k]));
+    return sortConfig.dir === 'asc' ? cmp : -cmp;
+  });
+  return (
+    <div className="table-wrap">
+      <table className="cert-table">
+        <thead>
+          <tr>
+            {COLUMNS.map(col => (
+              <th key={col.key} className={`cert-th ${col.sortable?'sortable':''} ${sortConfig.key===col.key?'sort-active':''}`} onClick={() => col.sortable && onSort(col.key)}>
+                {col.label}
+                {col.sortable && <span className="sort-indicator">{sortConfig.key===col.key ? (sortConfig.dir==='asc'?' ↑':' ↓') : ' ↕'}</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <CertTableSkeleton />
+          ) : sorted.length === 0 ? (
+            <CertTableEmpty hasFilter={!!statusFilter} />
+          ) : (
+            sorted.map(cert => <CertRow key={cert.id} cert={cert} onManage={onManage} />)
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const REFRESH_OPTIONS = [
+  { label: '30s',  value: 30_000  },
+  { label: '60s',  value: 60_000  },
+  { label: '5min', value: 300_000 },
+  { label: 'Off',  value: null    },
+];
+
+const THEME_OPTIONS = [
+  { label: 'Dark Mode (default)', value: 'dark'  },
+  { label: 'Light Mode',          value: 'light' },
+  { label: 'Meg Mode',            value: 'meg'   },
+];
+
+// <select> only emits strings — round-trip primitives (null / number / string)
+// through the option list so booleans and `null` survive a save.
+function selectValueToString(v) {
+  if (v === null || v === undefined) return '__null__';
+  return String(v);
+}
+function stringToSelectValue(s, options) {
+  const match = options.find(o => selectValueToString(o.value) === s);
+  return match ? match.value : s;
+}
+
+const STATUS_BADGES = [
+  { status:'Critical', cls:'badge-critical' },
+  { status:'Warning',  cls:'badge-warning'  },
+  { status:'Healthy',  cls:'badge-healthy'  },
+  { status:'Expired',  cls:'badge-expired'  },
+];
+
+function CertDashboard({ certs, loading, lastRefreshed, tick, sortConfig, onSort, onRefresh, refreshInterval, onSetRefreshInterval, onManage, onNewCert }) {
+  const [statusFilter, setStatusFilter] = useState(null);
+  const counts = certs.reduce((acc,c) => { acc[c.status]=(acc[c.status]||0)+1; return acc; }, {});
+  const activeLabel = REFRESH_OPTIONS.find(o => o.value === refreshInterval)?.label ?? 'Off';
+  const filteredCerts = statusFilter ? certs.filter(c => c.status === statusFilter) : certs;
+
+  function toggleFilter(status) {
+    setStatusFilter(f => f === status ? null : status);
+  }
+
+  return (
+    <div>
+      {/* Row 1 — primary: title + filters | CTA */}
+      <div className="dashboard-header">
+        <div className="dashboard-title">
+          Certificates
+          {STATUS_BADGES.filter(({ status }) => (counts[status]||0) > 0).map(({ status, cls }) => (
+            <span
+              key={status}
+              className={`badge ${cls} badge-filter ${statusFilter === status ? 'filter-active' : statusFilter ? 'filter-inactive' : ''}`}
+              style={{fontSize:11}}
+              onClick={() => toggleFilter(status)}
+              title={statusFilter === status ? 'Clear filter' : `Show ${status} only`}
+            >
+              {counts[status]} {status}
+            </span>
+          ))}
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={onNewCert}>
+          ⊕ New Certificate
+        </button>
+      </div>
+      {/* Row 2 — secondary: refresh metadata | interval controls */}
+      <div className="dashboard-toolbar">
+        <span className="dashboard-toolbar-meta">
+          {lastRefreshed ? `↺ ${formatRelativeTime(lastRefreshed)}` : 'Not yet refreshed'}
+          {refreshInterval ? ` · auto ${activeLabel}` : ''}
+        </span>
+        <div className="dashboard-toolbar-controls">
+          <div className="refresh-interval-group">
+            {REFRESH_OPTIONS.map(opt => (
+              <button
+                key={String(opt.value)}
+                className={`refresh-interval-btn ${refreshInterval === opt.value ? 'active' : ''}`}
+                onClick={() => onSetRefreshInterval(opt.value)}
+                title={opt.value ? `Auto-refresh every ${opt.label}` : 'Disable auto-refresh'}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={onRefresh} disabled={loading}>
+            {loading ? <><span className="spinner" style={{borderTopColor:'var(--text-primary)'}} /> Loading…</> : '↻ Refresh'}
+          </button>
+        </div>
+      </div>
+      <CertTable certs={filteredCerts} sortConfig={sortConfig} onSort={onSort} onManage={onManage} loading={loading} statusFilter={statusFilter} />
+    </div>
+  );
+}
+
+function SettingsPanel({ open, settings, onSave, onClose }) {
+  const [showVaultToken,  setShowVaultToken]  = useState(false);
+  const [draft, setDraft] = useState(settings);
+
+  // Re-seed the draft from saved settings whenever the panel is opened
+  // (or whenever saved settings change from elsewhere).
+  useEffect(() => { if (open) setDraft(settings); }, [open, settings]);
+
+  const dirty = Object.keys(draft).some(k => draft[k] !== settings[k]);
+
+  const updateDraft = (k, v) => setDraft(prev => ({ ...prev, [k]: v }));
+  const handleSave   = () => { if (dirty) onSave(draft); };
+  const handleReset  = () => setDraft(settings);
+
+  const fields = [
+    { key:'vaultUrl',     label:'Cloud Base URL',               placeholder:'https://api.venafi.cloud',          type:'text',     show:null,           setShow:null           },
+    { key:'vaultToken',   label:'API Key',                      placeholder:'••••••••••••••••',                  type:'password', show:showVaultToken, setShow:setShowVaultToken },
+    { key:'theme',        label:'Theme',                        type:'select', options: THEME_OPTIONS },
+    { key:'dnsHostnames', label:'DNS Hostnames (one per line)', placeholder:'host1.example.com\nhost2.example.com', type:'textarea', show:null,        setShow:null             },
+  ];
+  return (
+    <div className={`settings-panel ${open ? 'open' : ''}`}>
+      <div className="settings-drawer-header">
+        <span className="settings-drawer-title">Settings</span>
+        <button className="settings-drawer-close" onClick={onClose} type="button" title="Close">✕</button>
+      </div>
+      <div className="settings-drawer-body">
+        <div className="settings-grid">
+          {fields.map(f => (
+            <div key={f.key} className="settings-field">
+              <label>{f.label}</label>
+              <div className="settings-input-wrap">
+                {f.type === 'textarea' ? (
+                  <textarea
+                    className="settings-textarea"
+                    placeholder={f.placeholder} value={draft[f.key] ?? ''}
+                    onChange={e => updateDraft(f.key, e.target.value)}
+                    rows={5} autoComplete="off" spellCheck={false}
+                  />
+                ) : f.type === 'select' ? (
+                  <ThemedSelect
+                    value={draft[f.key]}
+                    options={f.options}
+                    onChange={v => updateDraft(f.key, v)}
+                  />
+                ) : (
+                  <input
+                    type={f.type === 'password' ? (f.show ? 'text' : 'password') : 'text'}
+                    placeholder={f.placeholder} value={draft[f.key] ?? ''}
+                    onChange={e => updateDraft(f.key, e.target.value)} autoComplete="off"
+                  />
+                )}
+                {f.type === 'password' && f.setShow && (
+                  <button className="eye-btn" onClick={() => f.setShow(s => !s)} type="button">
+                    <EyeIcon visible={f.show} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="settings-drawer-footer">
+        <div className="settings-actions">
+          <span className={`settings-dirty-indicator${dirty ? ' visible' : ''}`}>
+            Unsaved changes
+          </span>
+          <button className="btn btn-secondary btn-sm" onClick={handleReset} disabled={!dirty} type="button">
+            Reset
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!dirty} type="button">
+            Save Settings
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThemedSelect({ value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = options.find(o => o.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey     = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className={`themed-select ${open ? 'open' : ''}`}>
+      <button type="button" className="themed-select-trigger" onClick={() => setOpen(o => !o)}>
+        <span>{selected?.label ?? '—'}</span>
+        <svg className="themed-select-caret" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+          <path d="M5 7 1 3h8z"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="themed-select-menu" role="listbox">
+          {options.map(opt => {
+            const isSelected = opt.value === value;
+            return (
+              <div
+                key={selectValueToString(opt.value)}
+                role="option"
+                aria-selected={isSelected}
+                className={`themed-select-option ${isSelected ? 'selected' : ''}`}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+              >
+                <span>{opt.label}</span>
+                {isSelected && <span className="themed-select-check">✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThemeApplier({ theme }) {
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme || 'dark');
+  }, [theme]);
+  return null;
+}
+
+function POCBanner() {
+  return (
+    <div className="poc-banner">
+      <div className="poc-banner-dot" />
+      POC MODE — All API calls are mocked. Configure Settings to connect live endpoints.
+    </div>
+  );
+}
+
+function Header({ settingsOpen, onToggleSettings }) {
+  return (
+    <div className="header">
+      <div className="header-left">
+        <Logo />
+        <span className="header-tagline">Certificate Manager</span>
+      </div>
+      <div className="header-right">
+        <button className={`settings-toggle-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
+          ⚙ Settings {settingsOpen ? '▲' : '▼'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// APP ROOT
+// ─────────────────────────────────────────────────────────────
+function App() {
+  const [settings, setSettings] = useState({
+    vaultUrl:'', vaultToken:'',
+    dnsHostnames:'',
+    theme: 'dark',                  // 'dark' | 'light' | 'meg'
+    // { "<lowercase tag name>": "pem" | "p12" | "pfx" } — set when the user
+    // adds a new tag via the New Cert modal; drives download format defaults
+    // for any cert carrying that tag.
+    tagFormatPreferences: {},
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [certs, setCerts]               = useState([]);
+  const [loading, setLoading]           = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [tick, setTick]                 = useState(0);
+  const [sortConfig, setSortConfig]     = useState({ key:'daysRemaining', dir:'asc' });
+  const [modal, setModal]             = useState({ type:null, certId:null });
+  const [passphrases, setPassphrases] = useState({});
+  const [logEntries, setLogEntries]     = useState([]);
+  const [logState, setLogState]         = useState('collapsed'); // 'collapsed' | 'normal' | 'expanded'
+  const [refreshInterval, setRefreshInterval] = useState(null); // ms; null = off
+
+  function addLog(level, message) {
+    setLogEntries(prev => [...prev, { id:uuid(), timestamp:Date.now(), level, message }]);
+  }
+
+  const selectedCert = certs.find(c => c.id === modal.certId) || null;
+
+  function openModal(certId) {
+    setPassphrases(p => ({ ...p, [certId]: generatePassphrase() }));
+    setModal({ type:'manage', certId });
+  }
+
+  function openNewCertModal() { setModal({ type:'new-cert', certId:null }); }
+
+  function closeModal() { setModal({ type:null, certId:null }); }
+
+  function addCert(newCert) {
+    setCerts(prev => [newCert, ...prev]);
+  }
+
+  function updateCert(certId, patch) {
+    setCerts(prev => prev.map(c => c.id === certId ? { ...c, ...patch } : c));
+  }
+
+  // Union of all tags currently present on dashboard certs — used by the
+  // New Certificate modal to offer existing-tag chips alongside a +Custom input.
+  const existingTags = React.useMemo(() => {
+    const seen = new Map();
+    certs.forEach(c => (c.tags || []).forEach(t => {
+      const key = String(t).toLowerCase();
+      if (key && !seen.has(key)) seen.set(key, t);
+    }));
+    return Array.from(seen.values()).sort((a,b) => a.localeCompare(b));
+  }, [certs]);
+
+  // Persist a user-defined tag→format preference. Stored on settings so it
+  // survives like the rest of the configuration.
+  function setTagPreference(tagName, format) {
+    if (!tagName || !format) return;
+    setSettings(prev => ({
+      ...prev,
+      tagFormatPreferences: {
+        ...(prev.tagFormatPreferences || {}),
+        [String(tagName).toLowerCase()]: format,
+      },
+    }));
+  }
+
+  // After a brand-new cert is issued, ensure its hostname is in the dashboard's
+  // dnsHostnames filter (so the search picks it up) and trigger a refresh.
+  function appendDnsHostnameAndRefresh(hostname) {
+    if (!hostname) return;
+    setSettings(prev => {
+      const lines = (prev.dnsHostnames || '').split('\n').map(s => s.trim()).filter(Boolean);
+      if (lines.some(l => l.toLowerCase() === hostname.toLowerCase())) return prev;
+      const next = lines.concat(hostname).join('\n');
+      addLog('INFO', `Added ${hostname} to dashboard DNS filter.`);
+      return { ...prev, dnsHostnames: next };
+    });
+    // Note: the fetchCerts useEffect re-runs because `settings` is in its dep
+    // chain (via useCallback), so the dashboard reloads automatically.
+  }
+
+  const fetchCerts = useCallback(async () => {
+    setLoading(true);
+    const isLive = !!(settings.vaultUrl && settings.vaultToken);
+    addLog('API', isLive
+      ? `POST ${settings.vaultUrl}/outagedetection/v1/certificatesearch — fetching certificate inventory…`
+      : 'GET /api/v1/certificates — fetching certificate inventory (POC mock)…'
+    );
+    const t0 = Date.now();
+    try {
+      const data = isLive
+        ? await realFetchCerts(settings)
+        : await mockFetchCerts(settings);
+      setCerts(prev => {
+        const stateMap = {};
+        prev.forEach(c => {
+          stateMap[c.id] = {
+            renewedAt:    c.renewedAt,
+            downloadedAt: c.downloadedAt,
+            deployedAt:   c.deployedAt,
+            // If this cert was renewed, preserve the updated status/expiry so a
+            // refresh can't overwrite them with stale data.
+            ...(c.renewedAt ? {
+              status: c.status,
+              daysRemaining: c.daysRemaining,
+              expirationDate: c.expirationDate,
+            } : {}),
+          };
+        });
+        return data.map(c => ({ ...c, ...(stateMap[c.id] || {}) }));
+      });
+      setLastRefreshed(new Date());
+      addLog('API', isLive
+        ? `POST /outagedetection/v1/certificatesearch → 200 OK (${Date.now()-t0}ms) — ${data.length} certificates loaded`
+        : `GET /api/v1/certificates → 200 OK (${Date.now()-t0}ms) — ${data.length} certificates loaded`
+      );
+    } catch (err) {
+      addLog('ERROR', isLive
+        ? `POST /outagedetection/v1/certificatesearch → failed: ${err.message}`
+        : `GET /api/v1/certificates → failed: ${err.message}`
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [settings]);
+
+  // Initial load + "last refreshed" ticker
+  useEffect(() => {
+    fetchCerts();
+  }, [fetchCerts]);
+
+  useEffect(() => {
+    const ticker = setInterval(() => setTick(t => t+1), 15_000);
+    return () => clearInterval(ticker);
+  }, []);
+
+  // Reactive auto-refresh — re-runs whenever the interval setting or fetcher changes
+  useEffect(() => {
+    if (!refreshInterval) return;
+    const id = setInterval(fetchCerts, refreshInterval);
+    return () => clearInterval(id);
+  }, [refreshInterval, fetchCerts]);
+
+  function handleSort(key) {
+    setSortConfig(prev => prev.key === key ? { key, dir:prev.dir==='asc'?'desc':'asc' } : { key, dir:'asc' });
+  }
+
+  const closeSettings = () => setSettingsOpen(false);
+
+  return (
+    <div className="app-container">
+      <StyleInjector />
+      <Header settingsOpen={settingsOpen} onToggleSettings={() => setSettingsOpen(s => !s)} />
+      {!(settings.vaultUrl && settings.vaultToken) && <POCBanner />}
+      {settingsOpen && <div className="settings-backdrop" onClick={closeSettings} />}
+      <SettingsPanel open={settingsOpen} settings={settings} onClose={closeSettings} onSave={next => { setSettings(next); addLog('INFO', 'Settings saved.'); }} />
+      <ThemeApplier theme={settings.theme} />
+      <div className="main-content">
+        <CertDashboard
+          certs={certs} loading={loading} lastRefreshed={lastRefreshed} tick={tick}
+          sortConfig={sortConfig} onSort={handleSort} onRefresh={fetchCerts}
+          refreshInterval={refreshInterval} onSetRefreshInterval={setRefreshInterval}
+          onManage={openModal}
+          onNewCert={openNewCertModal}
+        />
+      </div>
+      {modal.type === 'manage' && (
+        <CertManageModal
+          cert={selectedCert} passphrase={passphrases[modal.certId]||''}
+          settings={settings} addLog={addLog} onUpdateCert={updateCert} onClose={closeModal}
+          onRequestRefresh={fetchCerts}
+        />
+      )}
+      {modal.type === 'new-cert' && (
+        <NewCertModal
+          addLog={addLog}
+          settings={settings}
+          existingTags={existingTags}
+          onCertIssued={appendDnsHostnameAndRefresh}
+          onSetTagPreference={setTagPreference}
+          onClose={closeModal}
+        />
+      )}
+      <ActivityLog
+        logEntries={logEntries} logState={logState} setLogState={setLogState}
+        onClear={() => { setLogEntries([]); setTimeout(() => addLog('INFO','Activity log cleared.'),50); }}
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOUNT
+// ─────────────────────────────────────────────────────────────
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

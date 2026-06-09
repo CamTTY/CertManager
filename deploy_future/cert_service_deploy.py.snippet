@@ -1,0 +1,156 @@
+# cert_service_deploy.py.snippet
+# ─────────────────────────────────────────────────────────────────────────────
+# This is the Deploy endpoint that was previously part of cert_service.py.
+# It was moved here when the Deploy feature was disabled. To re-enable it later:
+#   1. Move deploy_cert.ps1 back to the project root (or update DEPLOY_SCRIPT path).
+#   2. Paste the imports + constants + endpoint + parser back into cert_service.py.
+#   3. Re-add the Deploy UI block in index.html (see index_html_deploy.snippet.md).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Imports to add at the top of cert_service.py:
+#   import base64
+#   import json
+#   import os
+#   import subprocess
+#   import tempfile
+
+# Module-level constants (after `import config`):
+DEPLOY_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'deploy_cert.ps1')
+DEPLOY_TIMEOUT_SEC = 300
+
+
+# ── Endpoint ─────────────────────────────────────────────────────────────────
+
+@app.post('/api/deploy')
+def api_deploy():
+    """Run deploy_cert.ps1 against a target Windows IIS server.
+
+    Request body (JSON):
+      {
+        "targetServer":  "webserver01.lab.local",
+        "siteName":      "Default Web Site",
+        "bindingPort":   443,
+        "oldThumbprint": "ABC123…",        // optional
+        "replaceStore":  true,             // optional
+        "updateIIS":     true,             // optional
+        "pfxBase64":     "MIIK...",        // PFX bytes, base64-encoded
+        "pfxPassphrase": "..."             // private-key passphrase, set as env var for pwsh
+      }
+
+    Response: { ok, steps[], result{thumbprint, oldThumbprint, ...}, stderr }
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    required = ('targetServer', 'siteName', 'bindingPort', 'pfxBase64', 'pfxPassphrase')
+    missing = [k for k in required if k not in body or body[k] in (None, '')]
+    if missing:
+        return jsonify({'error': 'missing fields: {}'.format(', '.join(missing))}), 400
+
+    try:
+        pfx_bytes = base64.b64decode(body['pfxBase64'])
+    except Exception as e:
+        return jsonify({'error': 'pfxBase64 not valid base64: {}'.format(e)}), 400
+
+    env = os.environ.copy()
+    env['CERT_PASSPHRASE'] = body['pfxPassphrase']
+
+    # Write the PFX to a temp file (delete=False so we can pass the path to pwsh and
+    # clean up explicitly in finally — Windows can't reopen a NamedTemporaryFile).
+    tmp = tempfile.NamedTemporaryFile(suffix='.pfx', delete=False)
+    try:
+        tmp.write(pfx_bytes)
+        tmp.flush()
+    finally:
+        tmp.close()
+    tmp_path = tmp.name
+
+    cmd = [
+        'pwsh', '-NoProfile', '-NonInteractive', '-File', DEPLOY_SCRIPT,
+        '-TargetServer',  str(body['targetServer']),
+        '-PfxPath',       tmp_path,
+        '-SiteName',      str(body['siteName']),
+        '-BindingPort',   str(int(body['bindingPort'])),
+    ]
+    if body.get('oldThumbprint'):
+        cmd += ['-OldThumbprint', str(body['oldThumbprint'])]
+    if body.get('replaceStore'):
+        cmd += ['-ReplaceStore']
+    if body.get('updateIIS'):
+        cmd += ['-UpdateIIS']
+
+    try:
+        try:
+            completed = subprocess.run(
+                cmd, capture_output=True, text=True, env=env, timeout=DEPLOY_TIMEOUT_SEC,
+            )
+        except FileNotFoundError:
+            log.error('pwsh not found on PATH')
+            return jsonify({
+                'ok': False,
+                'error': 'pwsh (PowerShell 7) not found on cert_service host — install it or place it on PATH',
+            }), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({
+                'ok': False,
+                'error': 'deploy script timed out after {}s'.format(DEPLOY_TIMEOUT_SEC),
+            }), 504
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    parsed = _parse_deploy_output(completed.stdout)
+    parsed['stderr'] = (completed.stderr or '')[-2000:]  # truncate
+    parsed['returncode'] = completed.returncode
+
+    if completed.returncode != 0 or not parsed.get('result'):
+        # Surface the structured error if the script emitted one, else a generic message.
+        err = parsed.get('error') or {
+            'step': 'unknown',
+            'message': 'deploy_cert.ps1 exited with code {}'.format(completed.returncode),
+        }
+        log.error('deploy failed: %s', err)
+        return jsonify({
+            'ok': False,
+            'error': err.get('message', 'deploy failed'),
+            'errorStep': err.get('step'),
+            'steps': parsed.get('steps', []),
+            'stderr': parsed['stderr'],
+            'returncode': completed.returncode,
+        }), 500
+
+    return jsonify({
+        'ok': True,
+        'steps': parsed.get('steps', []),
+        'result': parsed['result'],
+        'stderr': parsed['stderr'],
+        'returncode': completed.returncode,
+    })
+
+
+def _parse_deploy_output(stdout):
+    """Walk the script's stdout, splitting STEP|... / RESULT|... / ERROR|... markers."""
+    steps  = []
+    result = None
+    error  = None
+    for raw in (stdout or '').splitlines():
+        line = raw.rstrip()
+        if not line:
+            continue
+        if line.startswith('STEP|'):
+            try:
+                _, step_id, message = line.split('|', 2)
+                steps.append({'id': step_id, 'message': message})
+            except ValueError:
+                pass
+        elif line.startswith('RESULT|'):
+            try:
+                result = json.loads(line[len('RESULT|'):])
+            except json.JSONDecodeError:
+                pass
+        elif line.startswith('ERROR|'):
+            try:
+                error = json.loads(line[len('ERROR|'):])
+            except json.JSONDecodeError:
+                error = {'step': 'unknown', 'message': line[len('ERROR|'):]}
+    return {'steps': steps, 'result': result, 'error': error}

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Env / secrets
+.env
+*.env
+service.env
+
+# Downloaded certs & keystores
+out/
+*.pem
+*.p12
+*.pfx
+*.jks
+*.der
+*.key
